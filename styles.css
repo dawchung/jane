@@ -68,6 +68,39 @@ button {
   padding: 32px 20px 48px;
 }
 
+.sync-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: rgba(255, 248, 236, 0.92);
+  border: 1px solid rgba(191, 91, 50, 0.12);
+  box-shadow: var(--shadow);
+}
+
+.sync-banner strong {
+  display: block;
+  font-size: 1rem;
+}
+
+.sync-banner p {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.sync-banner.is-cloud {
+  background: rgba(236, 247, 240, 0.95);
+  border-color: rgba(45, 106, 79, 0.22);
+}
+
+.sync-banner.is-warning {
+  background: rgba(253, 232, 228, 0.95);
+  border-color: rgba(163, 58, 45, 0.22);
+}
+
 .hero-card,
 .panel {
   background: var(--paper);
@@ -561,6 +594,11 @@ textarea {
 @media (max-width: 720px) {
   .app-shell {
     padding: 18px 14px 36px;
+  }
+
+  .sync-banner {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .hero-card,

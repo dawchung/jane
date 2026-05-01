@@ -109,6 +109,14 @@ const products = [
 ];
 
 const storageKey = "psych-shopping-session";
+const appConfig = window.APP_CONFIG || {};
+const syncConfig = {
+  provider: appConfig.sync?.provider || "local",
+  supabaseUrl: appConfig.sync?.supabaseUrl || "",
+  supabaseAnonKey: appConfig.sync?.supabaseAnonKey || "",
+  wardId: appConfig.sync?.wardId || "psych-ward-a",
+  pollIntervalMs: Number(appConfig.sync?.pollIntervalMs || 5000)
+};
 const defaultState = {
   session: {
     date: new Date().toISOString().slice(0, 10),
@@ -121,10 +129,19 @@ const defaultState = {
   completedDistribution: {}
 };
 
-let state = loadState();
+let state = structuredClone(defaultState);
 let catalogState = {
   category: products[0]?.category || "",
   subGroup: "all"
+};
+let storageAdapter = null;
+let saveTimerId = null;
+let syncIntervalId = null;
+let isInitialized = false;
+let syncBannerState = {
+  title: "同步模式：本機",
+  message: "目前資料只存在本機瀏覽器。",
+  tone: ""
 };
 
 const elements = {
@@ -135,6 +152,10 @@ const elements = {
   patientBed: document.querySelector("#patient-bed"),
   patientName: document.querySelector("#patient-name"),
   patientBalance: document.querySelector("#patient-balance"),
+  syncBanner: document.querySelector("#sync-banner"),
+  syncTitle: document.querySelector("#sync-title"),
+  syncMessage: document.querySelector("#sync-message"),
+  syncRefresh: document.querySelector("#sync-refresh"),
   patientSelector: document.querySelector("#patient-selector"),
   patientOverview: document.querySelector("#patient-overview"),
   categoryNav: document.querySelector("#category-nav"),
@@ -156,7 +177,9 @@ const elements = {
 
 initialize();
 
-function initialize() {
+async function initialize() {
+  storageAdapter = await buildStorageAdapter();
+  state = await storageAdapter.loadState();
   normalizeState();
   bindSessionForm();
   bindPatientForm();
@@ -165,7 +188,14 @@ function initialize() {
   bindCatalogInteraction();
   bindCartInteraction();
   bindReportInteraction();
+  updateSyncBanner(storageAdapter.getBannerState());
   render();
+
+  if (typeof storageAdapter.startPolling === "function") {
+    syncIntervalId = storageAdapter.startPolling(handleIncomingRemoteState);
+  }
+
+  isInitialized = true;
 }
 
 function bindSessionForm() {
@@ -253,9 +283,59 @@ function bindToolbar() {
     exportCsv();
   });
 
+  elements.syncRefresh.addEventListener("click", async () => {
+    await refreshFromRemote();
+  });
+
   elements.printReport.addEventListener("click", () => {
     window.print();
   });
+}
+
+function updateSyncBanner(nextState) {
+  syncBannerState = nextState;
+  elements.syncTitle.textContent = nextState.title;
+  elements.syncMessage.textContent = nextState.message;
+  elements.syncBanner.className = `sync-banner ${nextState.tone}`.trim();
+}
+
+async function refreshFromRemote() {
+  if (!storageAdapter || typeof storageAdapter.fetchRemoteState !== "function") {
+    updateSyncBanner({
+      title: "同步模式：本機",
+      message: "目前沒有雲端資料可重新整理。",
+      tone: ""
+    });
+    return;
+  }
+
+  updateSyncBanner({
+    title: "同步模式：雲端共享",
+    message: "正在重新整理雲端資料...",
+    tone: "is-cloud"
+  });
+
+  const remoteState = await storageAdapter.fetchRemoteState();
+  if (!remoteState) {
+    updateSyncBanner(storageAdapter.getBannerState());
+    return;
+  }
+
+  handleIncomingRemoteState(remoteState);
+}
+
+function handleIncomingRemoteState(nextState) {
+  const nextSerialized = JSON.stringify(mergeState(nextState));
+  const currentSerialized = JSON.stringify(mergeState(state));
+  if (nextSerialized === currentSerialized) {
+    updateSyncBanner(storageAdapter.getBannerState("雲端資料已是最新。"));
+    return;
+  }
+
+  state = mergeState(nextState);
+  normalizeState();
+  render();
+  updateSyncBanner(storageAdapter.getBannerState("已收到其他裝置的最新資料。"));
 }
 
 function bindCatalogInteraction() {
@@ -745,6 +825,8 @@ function normalizeActivePatient() {
 }
 
 function normalizeState() {
+  state = mergeState(state);
+
   if (!state.completedPurchases || typeof state.completedPurchases !== "object") {
     state.completedPurchases = {};
   }
@@ -802,7 +884,7 @@ function exportCsv() {
   URL.revokeObjectURL(url);
 }
 
-function loadState() {
+function loadLocalState() {
   try {
     const saved = localStorage.getItem(storageKey);
     if (!saved) {
@@ -810,22 +892,7 @@ function loadState() {
     }
 
     const parsed = JSON.parse(saved);
-    return {
-      ...structuredClone(defaultState),
-      ...parsed,
-      session: {
-        ...defaultState.session,
-        ...parsed.session
-      },
-      completedPurchases: {
-        ...defaultState.completedPurchases,
-        ...(parsed.completedPurchases || {})
-      },
-      completedDistribution: {
-        ...defaultState.completedDistribution,
-        ...(parsed.completedDistribution || {})
-      }
-    };
+    return mergeState(parsed);
   } catch (error) {
     console.error("無法讀取購物資料", error);
     return structuredClone(defaultState);
@@ -833,5 +900,204 @@ function loadState() {
 }
 
 function persist() {
-  localStorage.setItem(storageKey, JSON.stringify(state));
+  if (!isInitialized || !storageAdapter) {
+    return;
+  }
+
+  backupLocalState(state);
+  if (saveTimerId) {
+    window.clearTimeout(saveTimerId);
+  }
+
+  updateSyncBanner(storageAdapter.getBannerState("正在儲存資料..."));
+  saveTimerId = window.setTimeout(async () => {
+    try {
+      await storageAdapter.saveState(state);
+      updateSyncBanner(storageAdapter.getBannerState());
+    } catch (error) {
+      console.error("無法同步資料", error);
+      updateSyncBanner(storageAdapter.getBannerState("雲端同步失敗，資料已暫存在本機。", "is-warning"));
+    }
+  }, storageAdapter.mode === "cloud" ? 450 : 0);
+}
+
+function backupLocalState(nextState) {
+  localStorage.setItem(storageKey, JSON.stringify(mergeState(nextState)));
+}
+
+function mergeState(nextState) {
+  const parsed = nextState || {};
+  return {
+    ...structuredClone(defaultState),
+    ...parsed,
+    session: {
+      ...defaultState.session,
+      ...(parsed.session || {})
+    },
+    completedPurchases: {
+      ...defaultState.completedPurchases,
+      ...(parsed.completedPurchases || {})
+    },
+    completedDistribution: {
+      ...defaultState.completedDistribution,
+      ...(parsed.completedDistribution || {})
+    },
+    patients: Array.isArray(parsed.patients)
+      ? parsed.patients.map((patient) => ({
+          ...patient,
+          cart: Array.isArray(patient.cart) ? patient.cart : []
+        }))
+      : []
+  };
+}
+
+async function buildStorageAdapter() {
+  const localAdapter = createLocalStorageAdapter();
+  if (syncConfig.provider !== "supabase") {
+    return localAdapter;
+  }
+
+  if (!syncConfig.supabaseUrl || !syncConfig.supabaseAnonKey) {
+    return createLocalStorageAdapter("雲端同步未設定，已退回本機模式。");
+  }
+
+  try {
+    const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
+    return createSupabaseStorageAdapter(createClient, localAdapter);
+  } catch (error) {
+    console.error("無法載入 Supabase SDK", error);
+    return createLocalStorageAdapter("無法載入雲端同步元件，已退回本機模式。", "is-warning");
+  }
+}
+
+function createLocalStorageAdapter(message = "目前資料只存在本機瀏覽器。", tone = "") {
+  return {
+    mode: "local",
+    async loadState() {
+      return loadLocalState();
+    },
+    async saveState(nextState) {
+      backupLocalState(nextState);
+    },
+    getBannerState(overrideMessage, overrideTone) {
+      return {
+        title: "同步模式：本機",
+        message: overrideMessage || message,
+        tone: overrideTone || tone
+      };
+    }
+  };
+}
+
+function createSupabaseStorageAdapter(createClient, localAdapter) {
+  const client = createClient(syncConfig.supabaseUrl, syncConfig.supabaseAnonKey);
+  let lastRemoteUpdatedAt = "";
+
+  async function fetchRow() {
+    const { data, error } = await client
+      .from("shared_sessions")
+      .select("payload, updated_at")
+      .eq("ward_id", syncConfig.wardId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return data;
+  }
+
+  async function saveRemote(nextState) {
+    const mergedState = mergeState(nextState);
+    const updatedAt = new Date().toISOString();
+    const { error } = await client.from("shared_sessions").upsert(
+      {
+        ward_id: syncConfig.wardId,
+        payload: mergedState,
+        updated_at: updatedAt
+      },
+      { onConflict: "ward_id" }
+    );
+
+    if (error) {
+      throw error;
+    }
+
+    lastRemoteUpdatedAt = updatedAt;
+    backupLocalState(mergedState);
+  }
+
+  return {
+    mode: "cloud",
+    async loadState() {
+      const localState = loadLocalState();
+
+      try {
+        const remoteRow = await fetchRow();
+        if (remoteRow?.payload) {
+          lastRemoteUpdatedAt = remoteRow.updated_at || "";
+          backupLocalState(remoteRow.payload);
+          return mergeState(remoteRow.payload);
+        }
+
+        if (localState.patients.length > 0) {
+          await saveRemote(localState);
+          return localState;
+        }
+
+        return localState;
+      } catch (error) {
+        console.error("無法載入雲端資料", error);
+        return localState;
+      }
+    },
+    async saveState(nextState) {
+      await saveRemote(nextState);
+    },
+    async fetchRemoteState() {
+      try {
+        const remoteRow = await fetchRow();
+        if (!remoteRow?.payload) {
+          return null;
+        }
+
+        lastRemoteUpdatedAt = remoteRow.updated_at || lastRemoteUpdatedAt;
+        backupLocalState(remoteRow.payload);
+        return mergeState(remoteRow.payload);
+      } catch (error) {
+        console.error("無法重新整理雲端資料", error);
+        return null;
+      }
+    },
+    startPolling(onRemoteState) {
+      return window.setInterval(async () => {
+        try {
+          const remoteRow = await fetchRow();
+          if (!remoteRow?.payload) {
+            return;
+          }
+
+          if (remoteRow.updated_at && remoteRow.updated_at === lastRemoteUpdatedAt) {
+            return;
+          }
+
+          lastRemoteUpdatedAt = remoteRow.updated_at || lastRemoteUpdatedAt;
+          backupLocalState(remoteRow.payload);
+          onRemoteState(remoteRow.payload);
+        } catch (error) {
+          console.error("雲端輪詢失敗", error);
+        }
+      }, syncConfig.pollIntervalMs);
+    },
+    getBannerState(overrideMessage, overrideTone) {
+      const timestamp = lastRemoteUpdatedAt
+        ? `上次同步 ${new Date(lastRemoteUpdatedAt).toLocaleTimeString("zh-TW", { hour12: false })}`
+        : "已連線到雲端共享資料。";
+      return {
+        title: `同步模式：雲端共享（${syncConfig.wardId}）`,
+        message: overrideMessage || timestamp,
+        tone: overrideTone || "is-cloud"
+      };
+    }
+  };
 }

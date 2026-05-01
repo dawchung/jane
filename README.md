@@ -29,6 +29,44 @@
 - 病人選擇後可直接修改病人資料（床號、姓名、零用金）
 - 已選購品項可直接輸入數量，立即更新金額與彙整報表
 
+## 為什麼不同手機看不到同一份資料
+
+- 若使用 `local` 模式，資料只存在各自手機瀏覽器的 localStorage，所以不會跨裝置同步
+- 若要讓不同手機看到同一份清單，必須改用共用雲端資料庫
+
+## 已加入的共享同步結構
+
+- 頁面上方會顯示同步模式：本機 或 雲端共享
+- `config.js` 可設定同步提供者
+- 目前已預留 Supabase 同步模式
+- `supabase-setup.sql` 提供建立共享資料表的 SQL
+
+## 啟用 Supabase 共享同步
+
+1. 在 Supabase 建立一個專案
+2. 到 SQL Editor 執行 [supabase-setup.sql](supabase-setup.sql)
+3. 到 Project Settings 取得 `Project URL` 與 `publishable key`（或 legacy `anon key`）
+4. 編輯 [config.js](config.js)，改成：
+
+```js
+window.APP_CONFIG = {
+	sync: {
+		provider: "supabase",
+		supabaseUrl: "你的 Project URL",
+		supabaseAnonKey: "你的 publishable key",
+		wardId: "psych-ward-a",
+		pollIntervalMs: 5000
+	}
+};
+```
+
+5. 重新部署 GitHub Pages
+
+## 注意
+
+- 目前是共享病房資料的原型，採用「最後寫入者覆蓋」
+- 若要正式保存病人姓名等敏感資料，下一版建議再加登入與權限控管
+
 ## 使用方式
 
 1. 用瀏覽器開啟 `index.html`

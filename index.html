@@ -14,6 +14,14 @@
   <div class="background-shape background-shape-right"></div>
 
   <main class="app-shell">
+    <section id="sync-banner" class="sync-banner">
+      <div>
+        <strong id="sync-title">同步模式：本機</strong>
+        <p id="sync-message">目前資料只存在本機瀏覽器。</p>
+      </div>
+      <button type="button" id="sync-refresh" class="secondary-button">重新整理雲端資料</button>
+    </section>
+
     <section class="hero-card">
       <div>
         <p class="eyebrow">病房購物流程數位化</p>
@@ -161,6 +169,7 @@
     </button>
   </template>
 
+  <script src="./config.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>
