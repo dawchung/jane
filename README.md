@@ -45,22 +45,23 @@
 
 1. 在 Supabase 建立一個專案
 2. 到 SQL Editor 執行 [supabase-setup.sql](supabase-setup.sql)
-3. 到 Project Settings 取得 `Project URL` 與 `publishable key`（或 legacy `anon key`）
-4. 編輯 [config.js](config.js)，改成：
+3. 若你先前已建立過 `shared_sessions`，也建議重新執行一次，讓 `notify pgrst, 'reload schema';` 重新整理 REST schema cache
+4. 到 Project Settings 取得 `Project URL` 與 `publishable key`（或 legacy `anon key`）
+5. 編輯 [config.js](config.js)，改成：
 
 ```js
 window.APP_CONFIG = {
-	sync: {
-		provider: "supabase",
-		supabaseUrl: "你的 Project URL",
-		supabaseAnonKey: "你的 publishable key",
-		wardId: "psych-ward-a",
-		pollIntervalMs: 5000
-	}
+  sync: {
+    provider: "supabase",
+    supabaseUrl: "你的 Project URL",
+    supabaseAnonKey: "你的 publishable key",
+    wardId: "psych-ward-a",
+    pollIntervalMs: 5000
+  }
 };
 ```
 
-5. 重新部署 GitHub Pages
+1. 重新部署 GitHub Pages
 
 ## 注意
 

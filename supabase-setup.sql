@@ -27,3 +27,5 @@ for update
 to anon
 using (true)
 with check (true);
+
+notify pgrst, 'reload schema';
