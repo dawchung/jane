@@ -961,13 +961,12 @@ async function buildStorageAdapter() {
     return createLocalStorageAdapter("雲端同步未設定，已退回本機模式。");
   }
 
-  try {
-    const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
-    return createSupabaseStorageAdapter(createClient, localAdapter);
-  } catch (error) {
-    console.error("無法載入 Supabase SDK", error);
+  const createClient = window.supabase?.createClient;
+  if (typeof createClient !== "function") {
     return createLocalStorageAdapter("無法載入雲端同步元件，已退回本機模式。", "is-warning");
   }
+
+  return createSupabaseStorageAdapter(createClient, localAdapter);
 }
 
 function createLocalStorageAdapter(message = "目前資料只存在本機瀏覽器。", tone = "") {
