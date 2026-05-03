@@ -117,16 +117,19 @@ const syncConfig = {
   wardId: appConfig.sync?.wardId || "psych-ward-a",
   pollIntervalMs: Number(appConfig.sync?.pollIntervalMs || 5000)
 };
+const defaultMonthlyAlertThreshold = 1000;
 const defaultState = {
   session: {
     date: new Date().toISOString().slice(0, 10),
     budgetLimit: 100,
-    note: ""
+    note: "",
+    monthlyAlertThreshold: defaultMonthlyAlertThreshold
   },
   patients: [],
   activePatientId: null,
   completedPurchases: {},
-  completedDistribution: {}
+  completedDistribution: {},
+  historyLogs: []
 };
 
 let state = structuredClone(defaultState);
@@ -168,7 +171,14 @@ const elements = {
   cartItems: document.querySelector("#cart-items"),
   aggregateSummary: document.querySelector("#aggregate-summary"),
   distributionList: document.querySelector("#distribution-list"),
+  weekReferenceDate: document.querySelector("#week-reference-date"),
+  monthReference: document.querySelector("#month-reference"),
+  monthAlertThreshold: document.querySelector("#month-alert-threshold"),
+  weeklySummary: document.querySelector("#weekly-summary"),
+  monthlySummary: document.querySelector("#monthly-summary"),
   exportCsv: document.querySelector("#export-csv"),
+  exportWeeklyCsv: document.querySelector("#export-weekly-csv"),
+  exportMonthlyCsv: document.querySelector("#export-monthly-csv"),
   printReport: document.querySelector("#print-report"),
   statPatients: document.querySelector("#stat-patients"),
   statOrders: document.querySelector("#stat-orders"),
@@ -202,12 +212,21 @@ function bindSessionForm() {
   elements.shoppingDate.value = state.session.date;
   elements.budgetLimit.value = state.session.budgetLimit;
   elements.sessionNote.value = state.session.note;
+  elements.monthAlertThreshold.value = String(state.session.monthlyAlertThreshold || defaultMonthlyAlertThreshold);
+  elements.weekReferenceDate.value = state.session.date;
+  elements.monthReference.value = toMonthValue(state.session.date);
 
   [elements.shoppingDate, elements.budgetLimit, elements.sessionNote].forEach((input) => {
     input.addEventListener("input", () => {
       state.session.date = elements.shoppingDate.value;
       state.session.budgetLimit = Number(elements.budgetLimit.value || 0);
       state.session.note = elements.sessionNote.value.trim();
+      if (!elements.weekReferenceDate.value) {
+        elements.weekReferenceDate.value = state.session.date;
+      }
+      if (!elements.monthReference.value) {
+        elements.monthReference.value = toMonthValue(state.session.date);
+      }
       persist();
       render();
     });
@@ -281,6 +300,28 @@ function bindToolbar() {
 
   elements.exportCsv.addEventListener("click", () => {
     exportCsv();
+  });
+
+  elements.exportWeeklyCsv.addEventListener("click", () => {
+    exportWeeklyCsv();
+  });
+
+  elements.exportMonthlyCsv.addEventListener("click", () => {
+    exportMonthlyCsv();
+  });
+
+  elements.weekReferenceDate.addEventListener("input", () => {
+    renderPeriodReports();
+  });
+
+  elements.monthReference.addEventListener("input", () => {
+    renderPeriodReports();
+  });
+
+  elements.monthAlertThreshold.addEventListener("input", () => {
+    state.session.monthlyAlertThreshold = getMonthlyAlertThreshold();
+    persist();
+    renderPeriodReports();
   });
 
   elements.syncRefresh.addEventListener("click", async () => {
@@ -419,12 +460,14 @@ function bindReportInteraction() {
 }
 
 function render() {
+  syncCurrentSessionToHistory();
   renderPatientSelector();
   renderPatientOverview();
   renderCatalogNavigation();
   renderCatalog();
   renderCart();
   renderReports();
+  renderPeriodReports();
   renderHeroStats();
 }
 
@@ -835,6 +878,11 @@ function normalizeState() {
     state.completedDistribution = {};
   }
 
+  const nextThreshold = Number(state.session.monthlyAlertThreshold);
+  state.session.monthlyAlertThreshold = Number.isFinite(nextThreshold)
+    ? Math.max(0, Math.floor(nextThreshold))
+    : defaultMonthlyAlertThreshold;
+
   normalizeActivePatient();
 }
 
@@ -882,6 +930,290 @@ function exportCsv() {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function exportWeeklyCsv() {
+  const referenceDate = elements.weekReferenceDate.value || state.session.date || getTodayDate();
+  const range = getWeekRange(referenceDate);
+  const logs = getLogsInRange(range.start, range.end);
+  const summary = buildPeriodSummary(logs);
+  if (!logs.length) {
+    window.alert("此週沒有可匯出的消費資料。");
+    return;
+  }
+
+  const label = `${range.start}~${range.end}`;
+  const rows = buildPeriodCsvRows("週報", label, logs, summary);
+  downloadCsv(rows, `${range.start}-週報.csv`);
+}
+
+function exportMonthlyCsv() {
+  const monthValue = elements.monthReference.value || toMonthValue(state.session.date || getTodayDate());
+  const range = getMonthRange(monthValue);
+  const logs = getLogsInRange(range.start, range.end);
+  const summary = buildPeriodSummary(logs);
+  if (!logs.length) {
+    window.alert("此月份沒有可匯出的消費資料。");
+    return;
+  }
+
+  const rows = buildPeriodCsvRows("月報", monthValue, logs, summary);
+  downloadCsv(rows, `${monthValue}-月報.csv`);
+}
+
+function renderPeriodReports() {
+  const weekReferenceDate = elements.weekReferenceDate.value || state.session.date || getTodayDate();
+  const weekRange = getWeekRange(weekReferenceDate);
+  const weeklyLogs = getLogsInRange(weekRange.start, weekRange.end);
+  const weeklySummary = buildPeriodSummary(weeklyLogs);
+
+  if (!weeklyLogs.length) {
+    elements.weeklySummary.className = "summary-list empty-state";
+    elements.weeklySummary.textContent = `本週（${weekRange.start}~${weekRange.end}）尚無資料。`;
+  } else {
+    elements.weeklySummary.className = "summary-list";
+    elements.weeklySummary.innerHTML = buildPeriodSummaryMarkup("週", `${weekRange.start}~${weekRange.end}`, weeklySummary);
+  }
+
+  const monthValue = elements.monthReference.value || toMonthValue(state.session.date || getTodayDate());
+  const monthRange = getMonthRange(monthValue);
+  const monthlyLogs = getLogsInRange(monthRange.start, monthRange.end);
+  const monthlySummary = buildPeriodSummary(monthlyLogs);
+
+  if (!monthlyLogs.length) {
+    elements.monthlySummary.className = "summary-list empty-state";
+    elements.monthlySummary.textContent = `本月（${monthValue}）尚無資料。`;
+  } else {
+    elements.monthlySummary.className = "summary-list";
+    elements.monthlySummary.innerHTML = buildPeriodSummaryMarkup("月", monthValue, monthlySummary, getMonthlyAlertThreshold());
+  }
+}
+
+function getMonthlyAlertThreshold() {
+  const rawValue = Number(elements.monthAlertThreshold?.value || state.session.monthlyAlertThreshold || defaultMonthlyAlertThreshold);
+  if (!Number.isFinite(rawValue) || rawValue < 0) {
+    return defaultMonthlyAlertThreshold;
+  }
+
+  return Math.floor(rawValue);
+}
+
+function buildPeriodSummaryMarkup(reportType, periodLabel, summary, alertThreshold = 0) {
+  const topPatients = summary.patients.slice(0, 8);
+  const isMonthly = reportType === "月";
+  const alertPatients = isMonthly
+    ? summary.patients.filter((patient) => patient.total > alertThreshold)
+    : [];
+  const patientCards = topPatients
+    .map((patient) => {
+      const isAlert = isMonthly && patient.total > alertThreshold;
+      return `
+        <article class="summary-card compact ${isAlert ? "is-alert" : ""}">
+          <div class="summary-header">
+            <div>
+              <strong>${patient.bed}床 ${patient.name}</strong>
+              <div class="summary-meta">
+                ${reportType}內累計 ${patient.itemsCount} 件
+                ${isAlert ? `<span class="alert-text">，已超過 NT$${alertThreshold}</span>` : ""}
+              </div>
+            </div>
+            <span class="tag">NT$${patient.total}</span>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+
+  return `
+    <article class="summary-card">
+      <div class="summary-header">
+        <div>
+          <strong>${reportType}報期間：${periodLabel}</strong>
+          <div class="summary-meta">
+            ${summary.daysCount} 天有消費資料，${summary.patients.length} 位病人
+            ${isMonthly ? `，超過門檻 ${alertPatients.length} 位` : ""}
+          </div>
+        </div>
+        <span class="tag">合計 NT$${summary.totalAmount}</span>
+      </div>
+    </article>
+    ${patientCards}
+  `;
+}
+
+function buildPeriodSummary(logs) {
+  const patientMap = new Map();
+  let totalAmount = 0;
+
+  logs.forEach((log) => {
+    totalAmount += Number(log.totalAmount || 0);
+    (log.patientTotals || []).forEach((entry) => {
+      const key = `${entry.bed}|${entry.name}`;
+      const existing = patientMap.get(key) || {
+        bed: entry.bed,
+        name: entry.name,
+        total: 0,
+        itemsCount: 0
+      };
+      existing.total += Number(entry.total || 0);
+      existing.itemsCount += Number(entry.itemsCount || 0);
+      patientMap.set(key, existing);
+    });
+  });
+
+  return {
+    totalAmount,
+    daysCount: logs.length,
+    patients: [...patientMap.values()].sort((left, right) => right.total - left.total)
+  };
+}
+
+function buildPeriodCsvRows(reportType, periodLabel, logs, summary) {
+  const isMonthly = reportType === "月報";
+  const monthlyThreshold = getMonthlyAlertThreshold();
+  const rows = [["報表類型", "期間", "日期", "床號", "姓名", "消費總額", "件數", "超過門檻"]];
+  rows.push([reportType, periodLabel, "期間合計", "", "", String(summary.totalAmount), "", ""]);
+
+  summary.patients.forEach((patient) => {
+    const isAlert = isMonthly && patient.total > monthlyThreshold;
+    rows.push([
+      reportType,
+      periodLabel,
+      "病人期間合計",
+      patient.bed,
+      patient.name,
+      String(patient.total),
+      String(patient.itemsCount),
+      isAlert ? "是" : "否"
+    ]);
+  });
+
+  rows.push(["", "", "", "", "", "", "", ""]);
+  rows.push(["報表類型", "期間", "日期", "床號", "姓名", "每日消費", "每日件數", "超過門檻"]);
+
+  logs.forEach((log) => {
+    (log.patientTotals || []).forEach((entry) => {
+      const isAlert = isMonthly && Number(entry.total) > monthlyThreshold;
+      rows.push([
+        reportType,
+        periodLabel,
+        log.date,
+        entry.bed,
+        entry.name,
+        String(entry.total),
+        String(entry.itemsCount),
+        isAlert ? "是" : "否"
+      ]);
+    });
+  });
+
+  return rows;
+}
+
+function downloadCsv(rows, fileName) {
+  const csv = rows
+    .map((row) => row.map((cell) => `"${String(cell).replaceAll("\"", "\"\"")}"`).join(","))
+    .join("\n");
+
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function syncCurrentSessionToHistory() {
+  const nextDate = state.session.date || getTodayDate();
+  const patientTotals = state.patients.map((patient) => ({
+    patientId: patient.id,
+    bed: patient.bed,
+    name: patient.name,
+    total: getPatientTotal(patient),
+    itemsCount: patient.cart.reduce((sum, entry) => sum + entry.quantity, 0)
+  }));
+
+  const totalAmount = patientTotals.reduce((sum, entry) => sum + entry.total, 0);
+  const nextLog = {
+    date: nextDate,
+    note: state.session.note || "",
+    totalAmount,
+    patientTotals,
+    updatedAt: new Date().toISOString()
+  };
+
+  const logs = Array.isArray(state.historyLogs) ? [...state.historyLogs] : [];
+  const existingIndex = logs.findIndex((entry) => entry.date === nextDate);
+  if (existingIndex >= 0) {
+    logs[existingIndex] = nextLog;
+  } else {
+    logs.push(nextLog);
+  }
+
+  state.historyLogs = logs.sort((left, right) => left.date.localeCompare(right.date));
+}
+
+function getLogsInRange(startDate, endDate) {
+  const logs = Array.isArray(state.historyLogs) ? state.historyLogs : [];
+  return logs.filter((entry) => entry.date >= startDate && entry.date <= endDate);
+}
+
+function getWeekRange(referenceDate) {
+  const baseDate = parseInputDate(referenceDate);
+  const weekDay = baseDate.getDay();
+  const distanceToMonday = weekDay === 0 ? 6 : weekDay - 1;
+  const startDate = new Date(baseDate);
+  startDate.setDate(baseDate.getDate() - distanceToMonday);
+  const endDate = new Date(startDate);
+  endDate.setDate(startDate.getDate() + 6);
+
+  return {
+    start: formatDate(startDate),
+    end: formatDate(endDate)
+  };
+}
+
+function getMonthRange(monthValue) {
+  const [yearText, monthText] = (monthValue || toMonthValue(getTodayDate())).split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const startDate = new Date(year, month - 1, 1);
+  const endDate = new Date(year, month, 0);
+
+  return {
+    start: formatDate(startDate),
+    end: formatDate(endDate)
+  };
+}
+
+function parseInputDate(dateText) {
+  if (!dateText) {
+    return parseInputDate(getTodayDate());
+  }
+
+  const [yearText, monthText, dayText] = dateText.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  return new Date(year, month - 1, day);
+}
+
+function formatDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getTodayDate() {
+  return formatDate(new Date());
+}
+
+function toMonthValue(dateText) {
+  return (dateText || getTodayDate()).slice(0, 7);
 }
 
 function loadLocalState() {
@@ -942,6 +1274,25 @@ function mergeState(nextState) {
       ...defaultState.completedDistribution,
       ...(parsed.completedDistribution || {})
     },
+    historyLogs: Array.isArray(parsed.historyLogs)
+      ? parsed.historyLogs
+          .filter((entry) => entry && typeof entry.date === "string")
+          .map((entry) => ({
+            date: entry.date,
+            note: entry.note || "",
+            totalAmount: Number(entry.totalAmount || 0),
+            patientTotals: Array.isArray(entry.patientTotals)
+              ? entry.patientTotals.map((patient) => ({
+                  patientId: patient.patientId || "",
+                  bed: patient.bed || "",
+                  name: patient.name || "",
+                  total: Number(patient.total || 0),
+                  itemsCount: Number(patient.itemsCount || 0)
+                }))
+              : [],
+            updatedAt: entry.updatedAt || ""
+          }))
+      : [],
     patients: Array.isArray(parsed.patients)
       ? parsed.patients.map((patient) => ({
           ...patient,

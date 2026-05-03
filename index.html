@@ -159,6 +159,40 @@
           <div id="distribution-list" class="summary-list empty-state">尚未建立購物資料。</div>
         </section>
       </div>
+
+      <div class="period-report-grid">
+        <section class="period-report-card">
+          <div class="period-report-header">
+            <h3>週報匯出</h3>
+            <button type="button" id="export-weekly-csv" class="secondary-button">匯出週報 CSV</button>
+          </div>
+          <label>
+            <span>週報參考日期</span>
+            <input type="date" id="week-reference-date" />
+          </label>
+          <div id="weekly-summary" class="summary-list empty-state">尚無可用週報資料。</div>
+        </section>
+
+        <section class="period-report-card">
+          <div class="period-report-header">
+            <h3>月報匯出</h3>
+            <button type="button" id="export-monthly-csv" class="secondary-button">匯出月報 CSV</button>
+          </div>
+          <label>
+            <span>月報警示門檻</span>
+            <div class="input-prefix threshold-input">
+              <strong>NT$</strong>
+              <input type="number" id="month-alert-threshold" min="0" step="100" value="1000" />
+            </div>
+          </label>
+          <p class="threshold-hint">月消費超過此門檻時會顯示警示，並寫入月報 CSV。</p>
+          <label>
+            <span>月報月份</span>
+            <input type="month" id="month-reference" />
+          </label>
+          <div id="monthly-summary" class="summary-list empty-state">尚無可用月報資料。</div>
+        </section>
+      </div>
     </section>
   </main>
 
@@ -171,6 +205,6 @@
 
   <script src="./config.js?v=20260501b"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./app.js?v=20260501b"></script>
+  <script src="./app.js?v=20260503c"></script>
 </body>
 </html>

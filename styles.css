@@ -516,6 +516,53 @@ textarea {
   gap: 18px;
 }
 
+.period-report-grid {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+}
+
+.period-report-card {
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(92, 73, 49, 0.1);
+}
+
+.period-report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.summary-card.compact {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.threshold-hint {
+  margin: 0 0 10px;
+  color: var(--warn);
+  font-weight: 700;
+}
+
+.threshold-input {
+  max-width: 260px;
+}
+
+.summary-card.is-alert {
+  border-color: rgba(163, 58, 45, 0.35);
+  background: rgba(253, 232, 228, 0.95);
+}
+
+.alert-text {
+  color: var(--warn);
+  font-weight: 700;
+}
+
 .summary-meta {
   margin-top: 10px;
   color: var(--muted);
@@ -564,7 +611,8 @@ textarea {
   .hero-card,
   .panel-grid,
   .shopping-layout,
-  .report-grid {
+  .report-grid,
+  .period-report-grid {
     grid-template-columns: 1fr;
   }
 
@@ -628,6 +676,10 @@ textarea {
   .patient-panel,
   #print-report,
   #export-csv,
+  #export-weekly-csv,
+  #export-monthly-csv,
+  #week-reference-date,
+  #month-reference,
   #category-nav,
   #subcategory-nav,
   #product-search {
