@@ -571,49 +571,49 @@ window.PRODUCT_IMAGES = {
     "column": 0,
     "row": 0,
     "columns": 7,
-    "rows": 1
+    "rows": 2
   },
   "雅芳芒果青脆冰火把": {
     "sheet": "./assets/product-atlas-ice.webp",
     "column": 1,
     "row": 0,
     "columns": 7,
-    "rows": 1
+    "rows": 2
   },
   "百吉蘇打雪糕": {
     "sheet": "./assets/product-atlas-ice.webp",
     "column": 2,
     "row": 0,
     "columns": 7,
-    "rows": 1
+    "rows": 2
   },
   "義美香草銅鑼燒": {
     "sheet": "./assets/product-atlas-ice.webp",
     "column": 3,
     "row": 0,
     "columns": 7,
-    "rows": 1
+    "rows": 2
   },
   "義美巧克力銅鑼燒": {
     "sheet": "./assets/product-atlas-ice.webp",
     "column": 4,
     "row": 0,
     "columns": 7,
-    "rows": 1
+    "rows": 2
   },
   "義美紅豆牛奶": {
     "sheet": "./assets/product-atlas-ice.webp",
     "column": 5,
     "row": 0,
     "columns": 7,
-    "rows": 1
+    "rows": 2
   },
   "義美芒果冰棒": {
     "sheet": "./assets/product-atlas-ice.webp",
     "column": 6,
     "row": 0,
     "columns": 7,
-    "rows": 1
+    "rows": 2
   },
   "鉛筆": {
     "sheet": "./assets/product-atlas-daily.webp",
@@ -1229,97 +1229,97 @@ window.PRODUCT_IMAGES = {
     "column": 0,
     "row": 0,
     "columns": 8,
-    "rows": 1
+    "rows": 2
   },
   "同榮茄汁鯖魚": {
     "sheet": "./assets/product-atlas-cans.webp",
     "column": 1,
     "row": 0,
     "columns": 8,
-    "rows": 1
+    "rows": 2
   },
   "愛之味土豆麵筋": {
     "sheet": "./assets/product-atlas-cans.webp",
     "column": 2,
     "row": 0,
     "columns": 8,
-    "rows": 1
+    "rows": 2
   },
   "愛之味鮮嫩玉筍": {
     "sheet": "./assets/product-atlas-cans.webp",
     "column": 3,
     "row": 0,
     "columns": 8,
-    "rows": 1
+    "rows": 2
   },
   "愛之味脆瓜": {
     "sheet": "./assets/product-atlas-cans.webp",
     "column": 4,
     "row": 0,
     "columns": 8,
-    "rows": 1
+    "rows": 2
   },
   "愛之味菜心": {
     "sheet": "./assets/product-atlas-cans.webp",
     "column": 5,
     "row": 0,
     "columns": 8,
-    "rows": 1
+    "rows": 2
   },
   "愛之味蔭瓜": {
     "sheet": "./assets/product-atlas-cans.webp",
     "column": 6,
     "row": 0,
     "columns": 8,
-    "rows": 1
+    "rows": 2
   },
   "四川豆腐乳": {
     "sheet": "./assets/product-atlas-cans.webp",
     "column": 7,
     "row": 0,
     "columns": 8,
-    "rows": 1
+    "rows": 2
   },
   "人生浣腸": {
     "sheet": "./assets/product-atlas-other.webp",
     "column": 0,
     "row": 0,
     "columns": 6,
-    "rows": 1
+    "rows": 2
   },
   "萬金油19g": {
     "sheet": "./assets/product-atlas-other.webp",
     "column": 1,
     "row": 0,
     "columns": 6,
-    "rows": 1
+    "rows": 2
   },
   "綠油精5g": {
     "sheet": "./assets/product-atlas-other.webp",
     "column": 2,
     "row": 0,
     "columns": 6,
-    "rows": 1
+    "rows": 2
   },
   "雪芙蘭60g": {
     "sheet": "./assets/product-atlas-other.webp",
     "column": 3,
     "row": 0,
     "columns": 6,
-    "rows": 1
+    "rows": 2
   },
   "正光金絲膏": {
     "sheet": "./assets/product-atlas-other.webp",
     "column": 4,
     "row": 0,
     "columns": 6,
-    "rows": 1
+    "rows": 2
   },
   "人生比可舒": {
     "sheet": "./assets/product-atlas-other.webp",
     "column": 5,
     "row": 0,
     "columns": 6,
-    "rows": 1
+    "rows": 2
   }
 };
