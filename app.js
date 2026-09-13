@@ -1,4 +1,5 @@
-const products = [
+/* 商品資料由 catalog.js 載入。 */
+const products = window.PRODUCTS || [
   {
     category: "飲料",
     description: "依照現場價目表整理，常見飲料品項可直接加入。",
@@ -160,15 +161,27 @@ const elements = {
   syncMessage: document.querySelector("#sync-message"),
   syncRefresh: document.querySelector("#sync-refresh"),
   patientSelector: document.querySelector("#patient-selector"),
+  patientQuickNav: document.querySelector("#patient-quick-nav"),
   patientOverview: document.querySelector("#patient-overview"),
   categoryNav: document.querySelector("#category-nav"),
   subcategoryNav: document.querySelector("#subcategory-nav"),
   productSearch: document.querySelector("#product-search"),
+  clearSearch: document.querySelector("#clear-search"),
   customItemForm: document.querySelector("#custom-item-form"),
   customItemName: document.querySelector("#custom-item-name"),
   customItemPrice: document.querySelector("#custom-item-price"),
   catalogGroups: document.querySelector("#catalog-groups"),
   cartItems: document.querySelector("#cart-items"),
+  cartTotal: document.querySelector("#cart-total"),
+  cartStatus: document.querySelector("#cart-status"),
+  clearCart: document.querySelector("#clear-cart"),
+  confirmOrder: document.querySelector("#confirm-order"),
+  headerDate: document.querySelector("#header-date"),
+  mobileCartBar: document.querySelector("#mobile-cart-bar"),
+  mobilePatient: document.querySelector("#mobile-patient"),
+  mobileBudget: document.querySelector("#mobile-budget"),
+  mobileTotal: document.querySelector("#mobile-total"),
+  toast: document.querySelector("#toast"),
   aggregateSummary: document.querySelector("#aggregate-summary"),
   distributionList: document.querySelector("#distribution-list"),
   weekReferenceDate: document.querySelector("#week-reference-date"),
@@ -289,8 +302,24 @@ function bindToolbar() {
     render();
   });
 
+  elements.patientQuickNav.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-patient-id]");
+    if (!button) return;
+    state.activePatientId = button.dataset.patientId;
+    persist();
+    render();
+  });
+
   elements.productSearch.addEventListener("input", () => {
+    elements.clearSearch.classList.toggle("is-visible", Boolean(elements.productSearch.value));
     renderCatalog();
+  });
+
+  elements.clearSearch.addEventListener("click", () => {
+    elements.productSearch.value = "";
+    elements.clearSearch.classList.remove("is-visible");
+    renderCatalog();
+    elements.productSearch.focus();
   });
 
   elements.customItemForm.addEventListener("submit", (event) => {
@@ -431,6 +460,33 @@ function bindCartInteraction() {
 
     updateCartItem(input.dataset.productName, "set-quantity", input.value);
   });
+
+  elements.clearCart.addEventListener("click", () => {
+    const patient = getActivePatient();
+    if (!patient || patient.cart.length === 0) return;
+    if (!window.confirm(`確定要清空 ${patient.bed}床 ${patient.name} 的全部購物品項嗎？`)) return;
+    patient.cart = [];
+    persist();
+    render();
+    showToast(`已清空 ${patient.bed}床 ${patient.name} 的購物清單。`);
+  });
+
+  elements.confirmOrder.addEventListener("click", () => {
+    const patient = getActivePatient();
+    if (!patient || patient.cart.length === 0) {
+      showToast("請先選擇病人並加入商品。", "warning");
+      return;
+    }
+
+    const total = getPatientTotal(patient);
+    if (total > patient.balance || total > state.session.budgetLimit) {
+      showToast("目前金額超過零用金或購物上限，請先調整品項。", "warning");
+      return;
+    }
+
+    showToast(`已確認 ${patient.bed}床 ${patient.name}，共 NT$${total}。`);
+    document.querySelector("#reports")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
 }
 
 function bindReportInteraction() {
@@ -462,6 +518,7 @@ function bindReportInteraction() {
 function render() {
   syncCurrentSessionToHistory();
   renderPatientSelector();
+  renderPatientQuickNav();
   renderPatientOverview();
   renderCatalogNavigation();
   renderCatalog();
@@ -469,6 +526,40 @@ function render() {
   renderReports();
   renderPeriodReports();
   renderHeroStats();
+  renderPageContext();
+}
+
+function renderPageContext() {
+  const patient = getActivePatient();
+  const total = patient ? getPatientTotal(patient) : 0;
+  const remaining = patient ? Math.min(patient.balance, state.session.budgetLimit) - total : 0;
+  const isOver = Boolean(patient && (total > patient.balance || total > state.session.budgetLimit));
+
+  elements.headerDate.textContent = state.session.date
+    ? `${state.session.date.replaceAll("-", "/")} 購物`
+    : "本次購物";
+  elements.mobilePatient.textContent = patient ? `${patient.bed}床 ${patient.name}` : "尚未選擇病人";
+  elements.mobileBudget.textContent = patient
+    ? (isOver ? `已超出可用金額 NT$${Math.abs(remaining)}` : `還可選購 NT$${remaining}`)
+    : "請先建立購物名單";
+  elements.mobileTotal.textContent = `NT$${total}`;
+  elements.mobileCartBar.classList.toggle("is-over", isOver);
+}
+
+function renderPatientQuickNav() {
+  if (!state.patients.length) {
+    elements.patientQuickNav.innerHTML = "";
+    return;
+  }
+
+  elements.patientQuickNav.innerHTML = state.patients.map((patient) => {
+    const total = getPatientTotal(patient);
+    const active = patient.id === state.activePatientId;
+    const over = total > state.session.budgetLimit || total > patient.balance;
+    return `<button type="button" class="patient-chip ${active ? "is-active" : ""} ${over ? "has-alert" : ""}" data-patient-id="${patient.id}">
+      <strong>${patient.bed}床</strong><span>${patient.name}</span><small>NT$${total}</small>
+    </button>`;
+  }).join("");
 }
 
 function renderPatientSelector() {
@@ -545,7 +636,9 @@ function renderCatalogNavigation() {
   elements.categoryNav.innerHTML = products
     .map((group) => {
       const isActive = group.category === catalogState.category;
-      return `<button type="button" class="category-chip ${isActive ? "is-active" : ""}" data-category="${group.category}">${group.category}</button>`;
+      return `<button type="button" class="category-chip ${isActive ? "is-active" : ""}" data-category="${group.category}">
+        <span aria-hidden="true">${group.icon || "▦"}</span>${group.category}<small>${group.items.length}</small>
+      </button>`;
     })
     .join("");
 
@@ -579,24 +672,32 @@ function renderCatalog() {
     return;
   }
 
-  const filteredItems = activeGroup.items.filter((item) => item.name.toLowerCase().includes(keyword));
-  const subGroups = getPriceSubGroups(filteredItems);
-  const visibleGroups =
-    catalogState.subGroup === "all"
-      ? subGroups
-      : subGroups.filter((group) => group.key === catalogState.subGroup);
+  const sourceItems = keyword
+    ? products.flatMap((group) => group.items.map((item) => ({ ...item, sourceCategory: group.category })))
+    : activeGroup.items;
+  const filteredItems = sourceItems.filter((item) => item.name.toLowerCase().includes(keyword));
+  const subGroups = keyword
+    ? [{ key: "search", label: `搜尋結果「${elements.productSearch.value.trim()}」`, items: filteredItems }]
+    : getPriceSubGroups(filteredItems);
+  const visibleGroups = keyword || catalogState.subGroup === "all"
+    ? subGroups
+    : subGroups.filter((group) => group.key === catalogState.subGroup);
 
   const sections = visibleGroups
     .map((group) => {
       const cards = group.items
-        .map(
-          (item) => `
-            <button type="button" class="product-card" data-product-name="${item.name}">
+        .map((item) => {
+          const quantity = patient.cart.find((entry) => entry.name === item.name)?.quantity || 0;
+          return `
+            <button type="button" class="product-card ${quantity ? "is-selected" : ""} ${item.outOfStock ? "is-unavailable" : ""}"
+              data-product-name="${item.name}" ${item.outOfStock ? "disabled" : ""}>
+              ${quantity ? `<span class="selected-count">${quantity}</span>` : ""}
               <span class="product-name">${item.name}</span>
-              <span class="product-price">NT$${item.price}</span>
+              ${keyword && item.sourceCategory ? `<span class="product-category">${item.sourceCategory}</span>` : ""}
+              <span class="product-price">${item.outOfStock ? "缺貨" : `NT$${item.price}`}</span>
             </button>
-          `
-        )
+          `;
+        })
         .join("");
 
       return `
@@ -604,7 +705,7 @@ function renderCatalog() {
           <header>
             <div>
               <h3>${group.label}</h3>
-              <p>${activeGroup.description}</p>
+              <p>${keyword ? `共找到 ${group.items.length} 項商品` : (activeGroup.note || "依價格快速篩選")}</p>
             </div>
             <span class="tag">${group.items.length} 項</span>
           </header>
@@ -635,6 +736,21 @@ function getPriceSubGroups(items) {
 
 function renderCart() {
   const patient = getActivePatient();
+  const total = patient ? getPatientTotal(patient) : 0;
+  elements.cartTotal.textContent = `NT$${total}`;
+  elements.cartTotal.className = `cart-total ${patient && (total > patient.balance || total > state.session.budgetLimit) ? "is-over" : ""}`;
+  const hasItems = Boolean(patient?.cart.length);
+  const isOver = Boolean(patient && (total > patient.balance || total > state.session.budgetLimit));
+  elements.clearCart.disabled = !hasItems;
+  elements.confirmOrder.disabled = !hasItems || isOver;
+  elements.cartStatus.className = `cart-status ${isOver ? "is-over" : "is-safe"}`;
+  elements.cartStatus.textContent = !patient
+    ? "請先建立購物名單。"
+    : isOver
+      ? "超過零用金或購物上限，請減少品項。"
+      : hasItems
+        ? `金額符合規定，購後至少剩餘 NT$${Math.min(patient.balance, state.session.budgetLimit) - total}。`
+        : "選擇商品後，系統會在這裡檢查金額。";
 
   if (!patient || patient.cart.length === 0) {
     elements.cartItems.className = "cart-items empty-state";
@@ -665,6 +781,16 @@ function renderCart() {
       `;
     })
     .join("");
+}
+
+let toastTimerId = null;
+function showToast(message, tone = "success") {
+  window.clearTimeout(toastTimerId);
+  elements.toast.textContent = message;
+  elements.toast.className = `toast is-visible ${tone === "warning" ? "is-warning" : ""}`.trim();
+  toastTimerId = window.setTimeout(() => {
+    elements.toast.className = "toast";
+  }, 3200);
 }
 
 function renderReports() {
@@ -769,7 +895,7 @@ function addProductToActivePatient(productName) {
   const patient = getActivePatient();
   const product = findProduct(productName);
 
-  if (!patient || !product) {
+  if (!patient || !product || product.outOfStock) {
     return;
   }
 

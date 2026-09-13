@@ -7,13 +7,27 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=20260913b" />
 </head>
 <body>
   <div class="background-shape background-shape-left"></div>
   <div class="background-shape background-shape-right"></div>
 
   <main class="app-shell">
+    <header class="app-header">
+      <div class="brand-block">
+        <span class="brand-mark" aria-hidden="true">購</span>
+        <div>
+          <strong>精神科購物管理</strong>
+          <span>職能康復商店</span>
+        </div>
+      </div>
+      <div class="header-context">
+        <span id="header-date">本次購物</span>
+        <a class="header-help" href="#setup">設定與新增病人</a>
+      </div>
+    </header>
+
     <section id="sync-banner" class="sync-banner">
       <div>
         <strong id="sync-title">同步模式：本機</strong>
@@ -22,12 +36,19 @@
       <button type="button" id="sync-refresh" class="secondary-button">重新整理雲端資料</button>
     </section>
 
+    <nav class="workflow-nav" aria-label="操作流程">
+      <a href="#setup"><span>1</span>建立名單</a>
+      <a href="#shopping"><span>2</span>選擇商品</a>
+      <a href="#cart-panel"><span>3</span>確認清單</a>
+      <a href="#reports"><span>4</span>採買分發</a>
+    </nav>
+
     <section class="hero-card">
       <div>
-        <p class="eyebrow">病房購物流程數位化</p>
-        <h1>精神科病人購物清單管理</h1>
+        <p class="eyebrow">本次購物一覽</p>
+        <h1>今天要幫誰買什麼？</h1>
         <p class="hero-copy">
-          讓護理師在購物日前，直接完成病人點選、零用金檢核、品項彙整與列印總表，不再依靠手抄與記憶分發。
+          先選病人，再點選商品。系統會隨時計算金額並提醒可用餘額。
         </p>
       </div>
       <div class="hero-stats">
@@ -47,7 +68,7 @@
     </section>
 
     <section class="panel-grid">
-      <section class="panel control-panel">
+      <section id="setup" class="panel control-panel">
         <div class="panel-heading">
           <div>
             <p class="panel-kicker">Step 1</p>
@@ -73,7 +94,7 @@
           </label>
         </form>
 
-        <div class="panel-heading sub-heading">
+        <div id="patients" class="panel-heading sub-heading">
           <div>
             <p class="panel-kicker">Step 2</p>
             <h2>新增病人</h2>
@@ -100,7 +121,7 @@
         </form>
       </section>
 
-      <section class="panel patient-panel">
+      <section id="shopping" class="panel patient-panel">
         <div class="panel-heading">
           <div>
             <p class="panel-kicker">Step 3</p>
@@ -112,14 +133,22 @@
         <div id="patient-overview" class="patient-overview empty-state">
           請先新增病人。
         </div>
+        <div id="patient-quick-nav" class="patient-quick-nav" aria-label="快速切換病人"></div>
 
         <div class="shopping-layout">
           <div>
             <div id="category-nav" class="category-nav"></div>
             <div id="subcategory-nav" class="subcategory-nav"></div>
             <div class="catalog-toolbar">
-              <h3>商品價目表</h3>
-              <input type="search" id="product-search" placeholder="搜尋飲料、餅乾、電話卡..." />
+              <div>
+                <h3>商品價目表</h3>
+                <p>點一下加入購物清單；已選商品會顯示數量。</p>
+              </div>
+              <div class="search-box">
+                <span aria-hidden="true">⌕</span>
+                <input type="search" id="product-search" placeholder="搜尋商品名稱，例如：牙膏" autocomplete="off" />
+                <button type="button" id="clear-search" aria-label="清除搜尋">清除</button>
+              </div>
             </div>
             <form id="custom-item-form" class="inline-form" aria-label="新增自訂品項">
               <input type="text" id="custom-item-name" maxlength="40" placeholder="自訂品項名稱（例如：洗髮精）" required />
@@ -129,15 +158,23 @@
             <div id="catalog-groups" class="catalog-groups"></div>
           </div>
 
-          <aside class="cart-panel">
-            <h3>已選購品項</h3>
+          <aside id="cart-panel" class="cart-panel">
+            <div class="cart-heading">
+              <div><span class="cart-kicker">目前病人</span><h3>已選購品項</h3></div>
+              <strong id="cart-total" class="cart-total">NT$0</strong>
+            </div>
             <div id="cart-items" class="cart-items empty-state">尚未加入任何商品。</div>
+            <div id="cart-status" class="cart-status" aria-live="polite"></div>
+            <div class="cart-footer-actions">
+              <button type="button" id="clear-cart" class="secondary-button danger-button">清空</button>
+              <button type="button" id="confirm-order" class="primary-button">確認本次清單</button>
+            </div>
           </aside>
         </div>
       </section>
     </section>
 
-    <section class="panel report-panel">
+    <section id="reports" class="panel report-panel">
       <div class="panel-heading">
         <div>
           <p class="panel-kicker">Step 4</p>
@@ -196,6 +233,13 @@
     </section>
   </main>
 
+  <a id="mobile-cart-bar" class="mobile-cart-bar" href="#cart-panel">
+    <span><strong id="mobile-patient">尚未選擇病人</strong><small id="mobile-budget">請先建立購物名單</small></span>
+    <span><strong id="mobile-total">NT$0</strong><small>查看清單</small></span>
+  </a>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
   <template id="product-card-template">
     <button type="button" class="product-card">
       <span class="product-name"></span>
@@ -205,6 +249,7 @@
 
   <script src="./config.js?v=20260501b"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="./app.js?v=20260503c"></script>
+  <script src="./catalog.js?v=20260913a"></script>
+  <script src="./app.js?v=20260913b"></script>
 </body>
 </html>
