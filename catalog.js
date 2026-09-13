@@ -102,5 +102,10 @@ window.PRODUCTS = [
   }
 ].map((group) => ({
   ...group,
-  items: group.items.map(([name, price, outOfStock = false]) => ({ name, price, outOfStock }))
+  items: group.items.map(([name, price, outOfStock = false]) => ({
+    name,
+    price,
+    outOfStock,
+    image: window.PRODUCT_IMAGES?.[name] || ""
+  }))
 }));

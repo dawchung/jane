@@ -692,6 +692,7 @@ function renderCatalog() {
             <button type="button" class="product-card ${quantity ? "is-selected" : ""} ${item.outOfStock ? "is-unavailable" : ""}"
               data-product-name="${item.name}" ${item.outOfStock ? "disabled" : ""}>
               ${quantity ? `<span class="selected-count">${quantity}</span>` : ""}
+              ${item.image ? `<span class="product-image-wrap" aria-hidden="true" style="--image-sheet:url('${item.image.sheet}');--image-column:${item.image.column};--image-row:${item.image.row};--image-columns:${item.image.columns};--image-rows:${item.image.rows}"></span>` : ""}
               <span class="product-name">${item.name}</span>
               ${keyword && item.sourceCategory ? `<span class="product-category">${item.sourceCategory}</span>` : ""}
               <span class="product-price">${item.outOfStock ? "缺貨" : `NT$${item.price}`}</span>
