@@ -220,6 +220,32 @@ h1 {
   gap: 14px;
 }
 
+.batch-import-panel {
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid rgba(92, 73, 49, 0.14);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.batch-import-panel summary {
+  cursor: pointer;
+  font-weight: 800;
+  color: var(--accent);
+}
+
+.batch-import-panel p {
+  margin: 10px 0;
+  color: var(--muted);
+  font-size: .9rem;
+  line-height: 1.55;
+}
+
+.batch-import-panel textarea {
+  margin-bottom: 10px;
+  resize: vertical;
+}
+
 label span {
   display: block;
   margin-bottom: 7px;

@@ -119,6 +119,28 @@ const syncConfig = {
   pollIntervalMs: Number(appConfig.sync?.pollIntervalMs || 5000)
 };
 const defaultMonthlyAlertThreshold = 1000;
+const rosterVersion = 1;
+const initialRoster = [
+  { bed: "P1-04", name: "高X源", shoppingLimit: 100 },
+  { bed: "P1-05", name: "熊X智", shoppingLimit: 100 },
+  { bed: "P1-06", name: "李X吉", shoppingLimit: 100 },
+  { bed: "P1-07", name: "宋X偉", shoppingLimit: 100 },
+  { bed: "P1-08", name: "許X府", shoppingLimit: 100 },
+  { bed: "P1-09", name: "林X禾", shoppingLimit: 100 },
+  { bed: "P1-10", name: "黃X凱", shoppingLimit: 200 },
+  { bed: "P1-11", name: "黃X鑫", shoppingLimit: 100 },
+  { bed: "P1-12", name: "張X慶", shoppingLimit: 100 },
+  { bed: "P1-13", name: "葉X彰", shoppingLimit: 100 },
+  { bed: "P1-14", name: "林X亮", shoppingLimit: 100 },
+  { bed: "P1-15", name: "蔡X齊", shoppingLimit: 100 },
+  { bed: "P1-18", name: "洪X琳", shoppingLimit: 100 },
+  { bed: "P1-19", name: "楊X隆", shoppingLimit: 100 },
+  { bed: "P1-20", name: "盧X正", shoppingLimit: 100 },
+  { bed: "P1-21", name: "魏X暉", shoppingLimit: 100 },
+  { bed: "P1-22", name: "蔡X欣", shoppingLimit: 100 },
+  { bed: "P1-24", name: "陳X圳", shoppingLimit: 100 },
+  { bed: "P1-25", name: "林X峻", shoppingLimit: 100 }
+];
 const defaultState = {
   session: {
     date: new Date().toISOString().slice(0, 10),
@@ -132,7 +154,8 @@ const defaultState = {
   completedPurchases: {},
   completedDistribution: {},
   historyLogs: [],
-  balanceTransactions: []
+  balanceTransactions: [],
+  rosterVersion: 0
 };
 
 let state = structuredClone(defaultState);
@@ -159,6 +182,8 @@ const elements = {
   patientName: document.querySelector("#patient-name"),
   patientBalance: document.querySelector("#patient-balance"),
   patientShoppingLimit: document.querySelector("#patient-shopping-limit"),
+  rosterImportText: document.querySelector("#roster-import-text"),
+  importRoster: document.querySelector("#import-roster"),
   syncBanner: document.querySelector("#sync-banner"),
   syncTitle: document.querySelector("#sync-title"),
   syncMessage: document.querySelector("#sync-message"),
@@ -210,6 +235,7 @@ async function initialize() {
   storageAdapter = await buildStorageAdapter();
   state = await storageAdapter.loadState();
   normalizeState();
+  const rosterChanged = applyInitialRoster();
   bindSessionForm();
   bindPatientForm();
   bindPatientOverviewInteraction();
@@ -225,6 +251,7 @@ async function initialize() {
   }
 
   isInitialized = true;
+  if (rosterChanged) persist();
 }
 
 function bindSessionForm() {
@@ -261,7 +288,7 @@ function bindPatientForm() {
     const patient = {
       id: crypto.randomUUID(),
       bed: elements.patientBed.value.trim(),
-      name: elements.patientName.value.trim(),
+      name: maskPatientName(elements.patientName.value),
       balance: Number(elements.patientBalance.value || 0),
       shoppingLimit: Number(elements.patientShoppingLimit.value || state.session.budgetLimit || 100),
       cart: [],
@@ -299,7 +326,7 @@ function bindPatientOverviewInteraction() {
     }
 
     const bed = form.querySelector("#edit-patient-bed")?.value.trim() || "";
-    const name = form.querySelector("#edit-patient-name")?.value.trim() || "";
+    const name = maskPatientName(form.querySelector("#edit-patient-name")?.value || "");
     const balance = Number(form.querySelector("#edit-patient-balance")?.value || 0);
     const shoppingLimit = Number(form.querySelector("#edit-patient-shopping-limit")?.value || 0);
     if (!bed || !name || balance < 0 || shoppingLimit < 0) {
@@ -377,6 +404,10 @@ function bindToolbar() {
   elements.customItemForm.addEventListener("submit", (event) => {
     event.preventDefault();
     addCustomItemToActivePatient();
+  });
+
+  elements.importRoster.addEventListener("click", () => {
+    importRosterFromText();
   });
 
   elements.exportCsv.addEventListener("click", () => {
@@ -1028,6 +1059,134 @@ function addCustomItemToActivePatient() {
   render();
 }
 
+function importRosterFromText() {
+  const records = parseRosterText(elements.rosterImportText.value);
+  if (!records.length) {
+    showToast("找不到可匯入的床號與姓名。", "warning");
+    return;
+  }
+
+  const patientByBed = new Map(state.patients.map((patient) => [normalizeBed(patient.bed), patient]));
+  let added = 0;
+  let updated = 0;
+
+  records.forEach((record) => {
+    const bedKey = normalizeBed(record.bed);
+    const existing = patientByBed.get(bedKey);
+    if (existing) {
+      existing.bed = record.bed;
+      existing.name = record.name;
+      if (record.balance !== null) existing.balance = record.balance;
+      if (record.shoppingLimit !== null) existing.shoppingLimit = record.shoppingLimit;
+      markPatientUpdated(existing);
+      updated += 1;
+      return;
+    }
+
+    const patient = {
+      id: crypto.randomUUID(),
+      bed: record.bed,
+      name: record.name,
+      balance: record.balance ?? 0,
+      shoppingLimit: record.shoppingLimit ?? Number(state.session.budgetLimit || 100),
+      cart: [],
+      updatedAt: new Date().toISOString()
+    };
+    state.patients.push(patient);
+    patientByBed.set(bedKey, patient);
+    added += 1;
+  });
+
+  state.patients.sort((left, right) => normalizeBed(left.bed).localeCompare(normalizeBed(right.bed), "zh-Hant", { numeric: true }));
+  if (!state.activePatientId && state.patients.length) state.activePatientId = state.patients[0].id;
+  elements.rosterImportText.value = "";
+  persist();
+  render();
+  showToast(`名單已處理：新增 ${added} 人、更新 ${updated} 人。`);
+}
+
+function parseRosterText(sourceText) {
+  const recordMap = new Map();
+  String(sourceText || "").split(/\r?\n/).forEach((rawLine) => {
+    const line = rawLine.trim();
+    if (!line || /^\|?\s*[-:]+/.test(line)) return;
+
+    let fields;
+    if (line.includes("|")) {
+      fields = line.replace(/^\||\|$/g, "").split("|");
+    } else if (line.includes("\t")) {
+      fields = line.split("\t");
+    } else {
+      fields = line.split(",");
+    }
+    fields = fields.map((field) => field.trim());
+
+    const bedIndex = fields.findIndex((field) => /^P\d+-\d+$/i.test(field));
+    if (bedIndex < 0) return;
+    const bed = fields[bedIndex].toUpperCase();
+    const name = maskPatientName(fields[bedIndex + 1] || "");
+    if (!name || /姓名|---/.test(name)) return;
+
+    const balance = parseOptionalAmount(fields[bedIndex + 2]);
+    const shoppingLimit = parseOptionalAmount(fields[bedIndex + 3]);
+    recordMap.set(normalizeBed(bed), { bed, name, balance, shoppingLimit });
+  });
+  return [...recordMap.values()];
+}
+
+function parseOptionalAmount(value) {
+  if (value === undefined || value === null || String(value).trim() === "") return null;
+  const amount = Number(String(value).replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(amount) && amount >= 0 ? Math.floor(amount) : null;
+}
+
+function normalizeBed(bed) {
+  return String(bed || "").trim().toUpperCase();
+}
+
+function maskPatientName(value) {
+  const characters = Array.from(String(value || "").trim());
+  if (characters.length <= 1) return characters.join("");
+  if (characters.length === 2) return `${characters[0]}X`;
+  return `${characters[0]}${"X".repeat(characters.length - 2)}${characters.at(-1)}`;
+}
+
+function applyInitialRoster() {
+  if (Number(state.rosterVersion || 0) >= rosterVersion) return false;
+
+  const patientByBed = new Map(state.patients.map((patient) => [normalizeBed(patient.bed), patient]));
+  const migrationTime = new Date().toISOString();
+
+  initialRoster.forEach((record) => {
+    const bedKey = normalizeBed(record.bed);
+    const existing = patientByBed.get(bedKey);
+    if (existing) {
+      existing.bed = record.bed;
+      existing.name = record.name;
+      existing.shoppingLimit = record.shoppingLimit;
+      existing.updatedAt = migrationTime;
+      return;
+    }
+
+    const patient = {
+      id: `roster-${bedKey.toLowerCase()}`,
+      bed: record.bed,
+      name: record.name,
+      balance: 0,
+      shoppingLimit: record.shoppingLimit,
+      cart: [],
+      updatedAt: migrationTime
+    };
+    state.patients.push(patient);
+    patientByBed.set(bedKey, patient);
+  });
+
+  state.patients.sort((left, right) => normalizeBed(left.bed).localeCompare(normalizeBed(right.bed), "zh-Hant", { numeric: true }));
+  if (!state.activePatientId && state.patients.length) state.activePatientId = state.patients[0].id;
+  state.rosterVersion = rosterVersion;
+  return true;
+}
+
 function updateCartItem(productName, action, value) {
   const patient = getActivePatient();
   if (!patient) {
@@ -1582,7 +1741,7 @@ function mergeState(nextState) {
               ? entry.patientTotals.map((patient) => ({
                   patientId: patient.patientId || "",
                   bed: patient.bed || "",
-                  name: patient.name || "",
+                  name: maskPatientName(patient.name),
                   total: Number(patient.total || 0),
                   itemsCount: Number(patient.itemsCount || 0)
                 }))
@@ -1597,7 +1756,7 @@ function mergeState(nextState) {
             id: entry.id,
             patientId: entry.patientId || "",
             bed: entry.bed || "",
-            name: entry.name || "",
+            name: maskPatientName(entry.name),
             date: entry.date || "",
             type: entry.type || "deposit",
             amount: Number(entry.amount || 0),
@@ -1609,13 +1768,15 @@ function mergeState(nextState) {
     patients: Array.isArray(parsed.patients)
       ? parsed.patients.map((patient) => ({
           ...patient,
+          name: maskPatientName(patient.name),
           shoppingLimit: Number.isFinite(Number(patient.shoppingLimit))
             ? Math.max(0, Number(patient.shoppingLimit))
             : Number(parsed.session?.budgetLimit || defaultState.session.budgetLimit),
           cart: Array.isArray(patient.cart) ? patient.cart : [],
           updatedAt: patient.updatedAt || ""
         }))
-      : []
+      : [],
+    rosterVersion: Number(parsed.rosterVersion || 0)
   };
 }
 
@@ -1650,7 +1811,8 @@ function reconcileSharedState(localState, remoteState) {
     completedPurchases: { ...remote.completedPurchases, ...local.completedPurchases },
     completedDistribution: { ...remote.completedDistribution, ...local.completedDistribution },
     historyLogs: [...logMap.values()].sort((left, right) => left.date.localeCompare(right.date)),
-    balanceTransactions: [...transactionMap.values()]
+    balanceTransactions: [...transactionMap.values()],
+    rosterVersion: Math.max(Number(local.rosterVersion || 0), Number(remote.rosterVersion || 0))
   });
 
   refreshCurrentHistoryLog(reconciled);

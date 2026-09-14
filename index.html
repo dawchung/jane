@@ -126,6 +126,13 @@
           </label>
           <button type="submit" class="primary-button">加入今日購物名單</button>
         </form>
+
+        <details class="batch-import-panel">
+          <summary>批次匯入病人名單</summary>
+          <p>可貼上 Excel、CSV、Tab 分隔或 Markdown 表格。已有床號會保留零用金與購物清單；空白姓名不匯入。</p>
+          <textarea id="roster-import-text" rows="8" placeholder="例如：&#10;精一,P1-04,王OO,,100&#10;精一,P1-05,李OO,500,200"></textarea>
+          <button type="button" id="import-roster" class="secondary-button">匯入名單</button>
+        </details>
       </section>
 
       <section id="shopping" class="panel patient-panel">
@@ -270,6 +277,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./product-images.js?v=20260913b"></script>
   <script src="./catalog.js?v=20260914a"></script>
-  <script src="./app.js?v=20260914a"></script>
+  <script src="./app.js?v=20260914c"></script>
 </body>
 </html>
