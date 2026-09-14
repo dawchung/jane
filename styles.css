@@ -414,12 +414,25 @@ textarea {
   padding-top: 12px;
   border-top: 1px dashed rgba(92, 73, 49, 0.2);
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr auto;
+  grid-template-columns: 1fr 1fr 1fr 1fr auto;
   gap: 8px;
 }
 
 .patient-edit-form button {
   align-self: end;
+}
+
+.balance-entry-form {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: .8fr 1fr 1.5fr auto;
+  gap: 8px;
+}
+
+.balance-history {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(92, 73, 49, 0.2);
 }
 
 .catalog-group {
@@ -702,6 +715,10 @@ button:disabled { cursor: not-allowed; opacity: .46; transform: none !important;
     grid-template-columns: 1fr;
   }
 
+  .balance-entry-form {
+    grid-template-columns: 1fr;
+  }
+
   .catalog-toolbar input {
     max-width: none;
   }
@@ -771,8 +788,10 @@ button:disabled { cursor: not-allowed; opacity: .46; transform: none !important;
   #export-csv,
   #export-weekly-csv,
   #export-monthly-csv,
+  #export-yearly-csv,
   #week-reference-date,
   #month-reference,
+  #year-reference,
   #category-nav,
   #subcategory-nav,
   #product-search {
