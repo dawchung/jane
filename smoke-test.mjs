@@ -137,19 +137,19 @@ assert.equal(context.window.PRODUCTS.some((group) => group.category === "電話�
 
 const roster = test.parseRosterText(`
 | 精一 | P1-01 |  |  |
-| 精一 | P1-04 | 高崧源 |  | 100 |
-| 精一 | P1-10 | 黃翊凱 |  | 200 |
+| 精一 | P1-04 | 高X源 |  | 100 |
+| 精一 | P1-10 | 黃X凱 |  | 200 |
 `);
 assert.equal(roster.length, 2, "空白姓名床位不應匯入");
 assert.equal(roster.find((entry) => entry.bed === "P1-10").shoppingLimit, 200);
 assert.equal(roster.find((entry) => entry.bed === "P1-04").balance, null);
 assert.equal(roster.find((entry) => entry.bed === "P1-04").name, "高X源", "匯入時應自動隱去姓名中間字");
-assert.equal(test.maskPatientName("黃翊凱"), "黃X凱");
+assert.equal(test.maskPatientName("王小明"), "王X明");
 
 test.setState({
   ...common,
   patients: [{
-    id: "existing-p1-10", bed: "P1-10", name: "黃翊凱", balance: 5284, shoppingLimit: 100,
+    id: "existing-p1-10", bed: "P1-10", name: "黃X凱", balance: 5284, shoppingLimit: 100,
     cart: [{ name: "100元電話卡", price: 100, quantity: 1 }], updatedAt: timestamp
   }],
   rosterVersion: 0
