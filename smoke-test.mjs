@@ -72,6 +72,8 @@ globalThis.__appTest = {
   getLogsInRange,
   getYearRange,
   parseRosterText,
+  maskPatientName,
+  applyInitialRoster,
   addBalanceEntry,
   setState(value) { state = mergeState(value); normalizeState(); },
   getState() { return structuredClone(state); }
@@ -141,4 +143,23 @@ const roster = test.parseRosterText(`
 assert.equal(roster.length, 2, "空白姓名床位不應匯入");
 assert.equal(roster.find((entry) => entry.bed === "P1-10").shoppingLimit, 200);
 assert.equal(roster.find((entry) => entry.bed === "P1-04").balance, null);
+assert.equal(roster.find((entry) => entry.bed === "P1-04").name, "高X源", "匯入時應自動隱去姓名中間字");
+assert.equal(test.maskPatientName("黃翊凱"), "黃X凱");
+
+test.setState({
+  ...common,
+  patients: [{
+    id: "existing-p1-10", bed: "P1-10", name: "黃翊凱", balance: 5284, shoppingLimit: 100,
+    cart: [{ name: "100元電話卡", price: 100, quantity: 1 }], updatedAt: timestamp
+  }],
+  rosterVersion: 0
+});
+assert.equal(test.applyInitialRoster(), true, "舊資料應執行一次名單移轉");
+current = test.getState();
+const migratedPatient = current.patients.find((patient) => patient.bed === "P1-10");
+assert.equal(current.patients.length, 19, "應預先建立19位匿名病人");
+assert.equal(migratedPatient.name, "黃X凱");
+assert.equal(migratedPatient.balance, 5284, "既有零用金應保留");
+assert.equal(migratedPatient.cart.length, 1, "既有購物清單應保留");
+assert.equal(migratedPatient.shoppingLimit, 200, "黃X凱的個別上限應為200元");
 console.log("smoke test passed");
