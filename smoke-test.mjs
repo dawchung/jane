@@ -71,6 +71,7 @@ globalThis.__appTest = {
   buildPeriodCsvRows,
   getLogsInRange,
   getYearRange,
+  parseRosterText,
   addBalanceEntry,
   setState(value) { state = mergeState(value); normalizeState(); },
   getState() { return structuredClone(state); }
@@ -131,4 +132,13 @@ assert.equal(current.patients[0].balance, 1500, "零用金入帳應增加餘額"
 assert.equal(current.balanceTransactions.length, 1, "零用金入帳應保留交易紀錄");
 
 assert.equal(context.window.PRODUCTS.some((group) => group.category === "電話卡"), true);
+
+const roster = test.parseRosterText(`
+| 精一 | P1-01 |  |  |
+| 精一 | P1-04 | 高崧源 |  | 100 |
+| 精一 | P1-10 | 黃翊凱 |  | 200 |
+`);
+assert.equal(roster.length, 2, "空白姓名床位不應匯入");
+assert.equal(roster.find((entry) => entry.bed === "P1-10").shoppingLimit, 200);
+assert.equal(roster.find((entry) => entry.bed === "P1-04").balance, null);
 console.log("smoke test passed");
