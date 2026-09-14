@@ -67,6 +67,10 @@ globalThis.__appTest = {
   reconcileSharedState,
   getPatientLimit,
   syncCurrentSessionToHistory,
+  buildPeriodSummary,
+  buildPeriodCsvRows,
+  getLogsInRange,
+  getYearRange,
   addBalanceEntry,
   setState(value) { state = mergeState(value); normalizeState(); },
   getState() { return structuredClone(state); }
@@ -104,6 +108,12 @@ let current = test.getState();
 assert.equal(current.historyLogs.length, 1, "購物資料應寫入報表歷程");
 assert.equal(current.historyLogs[0].totalAmount, 100);
 assert.equal(current.historyLogs[0].patientTotals.length, 1);
+const yearRange = test.getYearRange("2026");
+const yearLogs = test.getLogsInRange(yearRange.start, yearRange.end);
+const yearSummary = test.buildPeriodSummary(yearLogs);
+const yearRows = test.buildPeriodCsvRows("年報", "2026", yearLogs, yearSummary);
+assert.equal(yearSummary.totalAmount, 100, "年報應彙整當年度消費");
+assert.equal(yearRows.some((row) => row[0] === "年報" && row[2] === "病人期間合計"), true);
 
 const fakeForm = {
   querySelector(selector) {
