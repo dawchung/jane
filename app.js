@@ -124,13 +124,15 @@ const defaultState = {
     date: new Date().toISOString().slice(0, 10),
     budgetLimit: 100,
     note: "",
-    monthlyAlertThreshold: defaultMonthlyAlertThreshold
+    monthlyAlertThreshold: defaultMonthlyAlertThreshold,
+    updatedAt: ""
   },
   patients: [],
   activePatientId: null,
   completedPurchases: {},
   completedDistribution: {},
-  historyLogs: []
+  historyLogs: [],
+  balanceTransactions: []
 };
 
 let state = structuredClone(defaultState);
@@ -156,6 +158,7 @@ const elements = {
   patientBed: document.querySelector("#patient-bed"),
   patientName: document.querySelector("#patient-name"),
   patientBalance: document.querySelector("#patient-balance"),
+  patientShoppingLimit: document.querySelector("#patient-shopping-limit"),
   syncBanner: document.querySelector("#sync-banner"),
   syncTitle: document.querySelector("#sync-title"),
   syncMessage: document.querySelector("#sync-message"),
@@ -189,9 +192,12 @@ const elements = {
   monthAlertThreshold: document.querySelector("#month-alert-threshold"),
   weeklySummary: document.querySelector("#weekly-summary"),
   monthlySummary: document.querySelector("#monthly-summary"),
+  yearlySummary: document.querySelector("#yearly-summary"),
+  yearReference: document.querySelector("#year-reference"),
   exportCsv: document.querySelector("#export-csv"),
   exportWeeklyCsv: document.querySelector("#export-weekly-csv"),
   exportMonthlyCsv: document.querySelector("#export-monthly-csv"),
+  exportYearlyCsv: document.querySelector("#export-yearly-csv"),
   printReport: document.querySelector("#print-report"),
   statPatients: document.querySelector("#stat-patients"),
   statOrders: document.querySelector("#stat-orders"),
@@ -228,12 +234,14 @@ function bindSessionForm() {
   elements.monthAlertThreshold.value = String(state.session.monthlyAlertThreshold || defaultMonthlyAlertThreshold);
   elements.weekReferenceDate.value = state.session.date;
   elements.monthReference.value = toMonthValue(state.session.date);
+  elements.yearReference.value = String(new Date(`${state.session.date}T00:00:00`).getFullYear());
 
   [elements.shoppingDate, elements.budgetLimit, elements.sessionNote].forEach((input) => {
     input.addEventListener("input", () => {
       state.session.date = elements.shoppingDate.value;
       state.session.budgetLimit = Number(elements.budgetLimit.value || 0);
       state.session.note = elements.sessionNote.value.trim();
+      state.session.updatedAt = new Date().toISOString();
       if (!elements.weekReferenceDate.value) {
         elements.weekReferenceDate.value = state.session.date;
       }
@@ -255,13 +263,16 @@ function bindPatientForm() {
       bed: elements.patientBed.value.trim(),
       name: elements.patientName.value.trim(),
       balance: Number(elements.patientBalance.value || 0),
-      cart: []
+      shoppingLimit: Number(elements.patientShoppingLimit.value || state.session.budgetLimit || 100),
+      cart: [],
+      updatedAt: new Date().toISOString()
     };
 
     state.patients.push(patient);
     state.activePatientId = patient.id;
     elements.patientForm.reset();
     elements.patientBalance.value = state.session.budgetLimit || 100;
+    elements.patientShoppingLimit.value = state.session.budgetLimit || 100;
     persist();
     render();
   });
@@ -269,6 +280,13 @@ function bindPatientForm() {
 
 function bindPatientOverviewInteraction() {
   elements.patientOverview.addEventListener("submit", (event) => {
+    const balanceForm = event.target.closest("#balance-entry-form");
+    if (balanceForm) {
+      event.preventDefault();
+      addBalanceEntry(balanceForm);
+      return;
+    }
+
     const form = event.target.closest("#edit-patient-form");
     if (!form) {
       return;
@@ -283,16 +301,50 @@ function bindPatientOverviewInteraction() {
     const bed = form.querySelector("#edit-patient-bed")?.value.trim() || "";
     const name = form.querySelector("#edit-patient-name")?.value.trim() || "";
     const balance = Number(form.querySelector("#edit-patient-balance")?.value || 0);
-    if (!bed || !name || balance < 0) {
+    const shoppingLimit = Number(form.querySelector("#edit-patient-shopping-limit")?.value || 0);
+    if (!bed || !name || balance < 0 || shoppingLimit < 0) {
       return;
     }
 
     patient.bed = bed;
     patient.name = name;
     patient.balance = balance;
+    patient.shoppingLimit = shoppingLimit;
+    markPatientUpdated(patient);
     persist();
     render();
   });
+}
+
+function addBalanceEntry(form) {
+  const patient = getActivePatient();
+  if (!patient) return;
+
+  const amount = Number(form.querySelector("#balance-entry-amount")?.value || 0);
+  const date = form.querySelector("#balance-entry-date")?.value || state.session.date || getTodayDate();
+  const note = form.querySelector("#balance-entry-note")?.value.trim() || "零用金入帳";
+  if (!Number.isFinite(amount) || amount <= 0) {
+    showToast("入帳金額必須大於0。", "warning");
+    return;
+  }
+
+  patient.balance += Math.floor(amount);
+  markPatientUpdated(patient);
+  state.balanceTransactions.push({
+    id: crypto.randomUUID(),
+    patientId: patient.id,
+    bed: patient.bed,
+    name: patient.name,
+    date,
+    type: "deposit",
+    amount: Math.floor(amount),
+    balanceAfter: patient.balance,
+    note,
+    createdAt: new Date().toISOString()
+  });
+  persist();
+  render();
+  showToast(`${patient.bed}床 ${patient.name} 已入帳 NT$${Math.floor(amount)}。`);
 }
 
 function bindToolbar() {
@@ -339,11 +391,19 @@ function bindToolbar() {
     exportMonthlyCsv();
   });
 
+  elements.exportYearlyCsv.addEventListener("click", () => {
+    exportYearlyCsv();
+  });
+
   elements.weekReferenceDate.addEventListener("input", () => {
     renderPeriodReports();
   });
 
   elements.monthReference.addEventListener("input", () => {
+    renderPeriodReports();
+  });
+
+  elements.yearReference.addEventListener("input", () => {
     renderPeriodReports();
   });
 
@@ -395,15 +455,17 @@ async function refreshFromRemote() {
 }
 
 function handleIncomingRemoteState(nextState) {
-  const nextSerialized = JSON.stringify(mergeState(nextState));
+  const reconciledState = reconcileSharedState(state, nextState);
+  const nextSerialized = JSON.stringify(reconciledState);
   const currentSerialized = JSON.stringify(mergeState(state));
   if (nextSerialized === currentSerialized) {
     updateSyncBanner(storageAdapter.getBannerState("雲端資料已是最新。"));
     return;
   }
 
-  state = mergeState(nextState);
+  state = reconciledState;
   normalizeState();
+  backupLocalState(state);
   render();
   updateSyncBanner(storageAdapter.getBannerState("已收到其他裝置的最新資料。"));
 }
@@ -466,6 +528,7 @@ function bindCartInteraction() {
     if (!patient || patient.cart.length === 0) return;
     if (!window.confirm(`確定要清空 ${patient.bed}床 ${patient.name} 的全部購物品項嗎？`)) return;
     patient.cart = [];
+    markPatientUpdated(patient);
     persist();
     render();
     showToast(`已清空 ${patient.bed}床 ${patient.name} 的購物清單。`);
@@ -479,12 +542,14 @@ function bindCartInteraction() {
     }
 
     const total = getPatientTotal(patient);
-    if (total > patient.balance || total > state.session.budgetLimit) {
+    if (total > patient.balance || total > getPatientLimit(patient)) {
       showToast("目前金額超過零用金或購物上限，請先調整品項。", "warning");
       return;
     }
 
     showToast(`已確認 ${patient.bed}床 ${patient.name}，共 NT$${total}。`);
+    syncCurrentSessionToHistory();
+    persist();
     document.querySelector("#reports")?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 }
@@ -532,8 +597,9 @@ function render() {
 function renderPageContext() {
   const patient = getActivePatient();
   const total = patient ? getPatientTotal(patient) : 0;
-  const remaining = patient ? Math.min(patient.balance, state.session.budgetLimit) - total : 0;
-  const isOver = Boolean(patient && (total > patient.balance || total > state.session.budgetLimit));
+  const patientLimit = patient ? getPatientLimit(patient) : 0;
+  const remaining = patient ? Math.min(patient.balance, patientLimit) - total : 0;
+  const isOver = Boolean(patient && (total > patient.balance || total > patientLimit));
 
   elements.headerDate.textContent = state.session.date
     ? `${state.session.date.replaceAll("-", "/")} 購物`
@@ -555,7 +621,7 @@ function renderPatientQuickNav() {
   elements.patientQuickNav.innerHTML = state.patients.map((patient) => {
     const total = getPatientTotal(patient);
     const active = patient.id === state.activePatientId;
-    const over = total > state.session.budgetLimit || total > patient.balance;
+    const over = total > getPatientLimit(patient) || total > patient.balance;
     return `<button type="button" class="patient-chip ${active ? "is-active" : ""} ${over ? "has-alert" : ""}" data-patient-id="${patient.id}">
       <strong>${patient.bed}床</strong><span>${patient.name}</span><small>NT$${total}</small>
     </button>`;
@@ -586,7 +652,8 @@ function renderPatientOverview() {
 
   const total = getPatientTotal(patient);
   const remaining = patient.balance - total;
-  const budgetRemaining = state.session.budgetLimit - total;
+  const patientLimit = getPatientLimit(patient);
+  const budgetRemaining = patientLimit - total;
   const overBudget = budgetRemaining < 0 || remaining < 0;
 
   elements.patientOverview.className = "patient-overview";
@@ -616,9 +683,32 @@ function renderPatientOverview() {
       <input id="edit-patient-bed" type="text" maxlength="10" value="${patient.bed}" required />
       <input id="edit-patient-name" type="text" maxlength="30" value="${patient.name}" required />
       <input id="edit-patient-balance" type="number" min="0" step="1" value="${patient.balance}" required />
+      <input id="edit-patient-shopping-limit" type="number" min="0" step="1" value="${patientLimit}" aria-label="個別購物上限" required />
       <button type="submit" class="secondary-button">更新病人資料</button>
     </form>
+    <form id="balance-entry-form" class="balance-entry-form" aria-label="零用金入帳">
+      <input id="balance-entry-date" type="date" value="${state.session.date || getTodayDate()}" required />
+      <input id="balance-entry-amount" type="number" min="1" step="1" placeholder="入帳金額" required />
+      <input id="balance-entry-note" type="text" maxlength="50" placeholder="備註，例如：家屬存入" />
+      <button type="submit" class="secondary-button">零用金入帳</button>
+    </form>
+    ${renderBalanceHistory(patient)}
   `;
+}
+
+function renderBalanceHistory(patient) {
+  const entries = state.balanceTransactions
+    .filter((entry) => entry.patientId === patient.id)
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
+    .slice(0, 5);
+  if (!entries.length) return "";
+
+  return `<div class="balance-history">
+    <strong>最近零用金入帳</strong>
+    <div class="summary-meta">${entries.map((entry) =>
+      `${entry.date}　+NT$${entry.amount}　${entry.note}（餘額 NT$${entry.balanceAfter}）`
+    ).join("<br>")}</div>
+  </div>`;
 }
 
 function renderCatalogNavigation() {
@@ -738,10 +828,11 @@ function getPriceSubGroups(items) {
 function renderCart() {
   const patient = getActivePatient();
   const total = patient ? getPatientTotal(patient) : 0;
+  const patientLimit = patient ? getPatientLimit(patient) : 0;
   elements.cartTotal.textContent = `NT$${total}`;
-  elements.cartTotal.className = `cart-total ${patient && (total > patient.balance || total > state.session.budgetLimit) ? "is-over" : ""}`;
+  elements.cartTotal.className = `cart-total ${patient && (total > patient.balance || total > patientLimit) ? "is-over" : ""}`;
   const hasItems = Boolean(patient?.cart.length);
-  const isOver = Boolean(patient && (total > patient.balance || total > state.session.budgetLimit));
+  const isOver = Boolean(patient && (total > patient.balance || total > patientLimit));
   elements.clearCart.disabled = !hasItems;
   elements.confirmOrder.disabled = !hasItems || isOver;
   elements.cartStatus.className = `cart-status ${isOver ? "is-over" : "is-safe"}`;
@@ -750,7 +841,7 @@ function renderCart() {
     : isOver
       ? "超過零用金或購物上限，請減少品項。"
       : hasItems
-        ? `金額符合規定，購後至少剩餘 NT$${Math.min(patient.balance, state.session.budgetLimit) - total}。`
+        ? `金額符合規定，購後至少剩餘 NT$${Math.min(patient.balance, patientLimit) - total}。`
         : "選擇商品後，系統會在這裡檢查金額。";
 
   if (!patient || patient.cart.length === 0) {
@@ -907,6 +998,7 @@ function addProductToActivePatient(productName) {
     patient.cart.push({ ...product, quantity: 1 });
   }
 
+  markPatientUpdated(patient);
   persist();
   render();
 }
@@ -930,6 +1022,7 @@ function addCustomItemToActivePatient() {
     patient.cart.push({ name, price, quantity: 1 });
   }
 
+  markPatientUpdated(patient);
   elements.customItemForm.reset();
   persist();
   render();
@@ -970,12 +1063,22 @@ function updateCartItem(productName, action, value) {
     }
   }
 
+  markPatientUpdated(patient);
   persist();
   render();
 }
 
 function getPatientTotal(patient) {
   return patient.cart.reduce((sum, entry) => sum + entry.price * entry.quantity, 0);
+}
+
+function getPatientLimit(patient) {
+  const limit = Number(patient?.shoppingLimit);
+  return Number.isFinite(limit) && limit >= 0 ? limit : Number(state.session.budgetLimit || 0);
+}
+
+function markPatientUpdated(patient) {
+  patient.updatedAt = new Date().toISOString();
 }
 
 function getActivePatient() {
@@ -1088,6 +1191,20 @@ function exportMonthlyCsv() {
   downloadCsv(rows, `${monthValue}-月報.csv`);
 }
 
+function exportYearlyCsv() {
+  const yearValue = getYearReference();
+  const range = getYearRange(yearValue);
+  const logs = getLogsInRange(range.start, range.end);
+  const summary = buildPeriodSummary(logs);
+  if (!logs.length) {
+    window.alert("此年度沒有可匯出的消費資料。");
+    return;
+  }
+
+  const rows = buildPeriodCsvRows("年報", yearValue, logs, summary);
+  downloadCsv(rows, `${yearValue}-年報.csv`);
+}
+
 function renderPeriodReports() {
   const weekReferenceDate = elements.weekReferenceDate.value || state.session.date || getTodayDate();
   const weekRange = getWeekRange(weekReferenceDate);
@@ -1114,6 +1231,25 @@ function renderPeriodReports() {
     elements.monthlySummary.className = "summary-list";
     elements.monthlySummary.innerHTML = buildPeriodSummaryMarkup("月", monthValue, monthlySummary, getMonthlyAlertThreshold());
   }
+
+  const yearValue = getYearReference();
+  const yearRange = getYearRange(yearValue);
+  const yearlyLogs = getLogsInRange(yearRange.start, yearRange.end);
+  const yearlySummary = buildPeriodSummary(yearlyLogs);
+
+  if (!yearlyLogs.length) {
+    elements.yearlySummary.className = "summary-list empty-state";
+    elements.yearlySummary.textContent = `本年度（${yearValue}）尚無資料。`;
+  } else {
+    elements.yearlySummary.className = "summary-list";
+    elements.yearlySummary.innerHTML = buildPeriodSummaryMarkup("年", yearValue, yearlySummary);
+  }
+}
+
+function getYearReference() {
+  const fallback = Number((state.session.date || getTodayDate()).slice(0, 4));
+  const value = Number(elements.yearReference?.value || fallback);
+  return String(Number.isInteger(value) && value >= 2020 && value <= 2100 ? value : fallback);
 }
 
 function getMonthlyAlertThreshold() {
@@ -1255,25 +1391,44 @@ function downloadCsv(rows, fileName) {
 
 function syncCurrentSessionToHistory() {
   const nextDate = state.session.date || getTodayDate();
-  const patientTotals = state.patients.map((patient) => ({
-    patientId: patient.id,
-    bed: patient.bed,
-    name: patient.name,
-    total: getPatientTotal(patient),
-    itemsCount: patient.cart.reduce((sum, entry) => sum + entry.quantity, 0)
-  }));
+  const patientTotals = state.patients
+    .map((patient) => ({
+      patientId: patient.id,
+      bed: patient.bed,
+      name: patient.name,
+      total: getPatientTotal(patient),
+      itemsCount: patient.cart.reduce((sum, entry) => sum + entry.quantity, 0)
+    }))
+    .filter((entry) => entry.total > 0 || entry.itemsCount > 0);
 
   const totalAmount = patientTotals.reduce((sum, entry) => sum + entry.total, 0);
-  const nextLog = {
+  const logs = Array.isArray(state.historyLogs) ? [...state.historyLogs] : [];
+  const existingIndex = logs.findIndex((entry) => entry.date === nextDate);
+
+  if (!patientTotals.length) {
+    if (existingIndex >= 0) logs.splice(existingIndex, 1);
+    state.historyLogs = logs;
+    return;
+  }
+
+  const nextContent = {
     date: nextDate,
     note: state.session.note || "",
     totalAmount,
-    patientTotals,
-    updatedAt: new Date().toISOString()
+    patientTotals
   };
+  const existing = existingIndex >= 0 ? logs[existingIndex] : null;
+  const existingContent = existing ? {
+    date: existing.date,
+    note: existing.note || "",
+    totalAmount: Number(existing.totalAmount || 0),
+    patientTotals: existing.patientTotals || []
+  } : null;
+  if (existingContent && JSON.stringify(existingContent) === JSON.stringify(nextContent)) {
+    return;
+  }
 
-  const logs = Array.isArray(state.historyLogs) ? [...state.historyLogs] : [];
-  const existingIndex = logs.findIndex((entry) => entry.date === nextDate);
+  const nextLog = { ...nextContent, updatedAt: new Date().toISOString() };
   if (existingIndex >= 0) {
     logs[existingIndex] = nextLog;
   } else {
@@ -1313,6 +1468,14 @@ function getMonthRange(monthValue) {
   return {
     start: formatDate(startDate),
     end: formatDate(endDate)
+  };
+}
+
+function getYearRange(yearValue) {
+  const year = Number(yearValue);
+  return {
+    start: `${year}-01-01`,
+    end: `${year}-12-31`
   };
 }
 
@@ -1363,6 +1526,7 @@ function persist() {
     return;
   }
 
+  syncCurrentSessionToHistory();
   backupLocalState(state);
   if (saveTimerId) {
     window.clearTimeout(saveTimerId);
@@ -1371,7 +1535,13 @@ function persist() {
   updateSyncBanner(storageAdapter.getBannerState("正在儲存資料..."));
   saveTimerId = window.setTimeout(async () => {
     try {
-      await storageAdapter.saveState(state);
+      const savedState = await storageAdapter.saveState(state);
+      if (savedState) {
+        state = reconcileSharedState(state, savedState);
+        normalizeState();
+        backupLocalState(state);
+        render();
+      }
       updateSyncBanner(storageAdapter.getBannerState());
     } catch (error) {
       console.error("無法同步資料", error);
@@ -1420,13 +1590,108 @@ function mergeState(nextState) {
             updatedAt: entry.updatedAt || ""
           }))
       : [],
+    balanceTransactions: Array.isArray(parsed.balanceTransactions)
+      ? parsed.balanceTransactions
+          .filter((entry) => entry && entry.id)
+          .map((entry) => ({
+            id: entry.id,
+            patientId: entry.patientId || "",
+            bed: entry.bed || "",
+            name: entry.name || "",
+            date: entry.date || "",
+            type: entry.type || "deposit",
+            amount: Number(entry.amount || 0),
+            balanceAfter: Number(entry.balanceAfter || 0),
+            note: entry.note || "",
+            createdAt: entry.createdAt || ""
+          }))
+      : [],
     patients: Array.isArray(parsed.patients)
       ? parsed.patients.map((patient) => ({
           ...patient,
-          cart: Array.isArray(patient.cart) ? patient.cart : []
+          shoppingLimit: Number.isFinite(Number(patient.shoppingLimit))
+            ? Math.max(0, Number(patient.shoppingLimit))
+            : Number(parsed.session?.budgetLimit || defaultState.session.budgetLimit),
+          cart: Array.isArray(patient.cart) ? patient.cart : [],
+          updatedAt: patient.updatedAt || ""
         }))
       : []
   };
+}
+
+function reconcileSharedState(localState, remoteState) {
+  const local = mergeState(localState);
+  const remote = mergeState(remoteState);
+  const session = newerEntity(local.session, remote.session);
+  const patientMap = new Map(remote.patients.map((patient) => [patient.id, patient]));
+
+  local.patients.forEach((patient) => {
+    const remotePatient = patientMap.get(patient.id);
+    patientMap.set(patient.id, remotePatient ? newerEntity(patient, remotePatient) : patient);
+  });
+
+  const logMap = new Map(remote.historyLogs.map((log) => [log.date, log]));
+  local.historyLogs.forEach((log) => {
+    const remoteLog = logMap.get(log.date);
+    logMap.set(log.date, remoteLog ? newerEntity(log, remoteLog) : log);
+  });
+
+  const transactionMap = new Map(remote.balanceTransactions.map((entry) => [entry.id, entry]));
+  local.balanceTransactions.forEach((entry) => transactionMap.set(entry.id, entry));
+
+  const reconciled = mergeState({
+    ...remote,
+    ...local,
+    session,
+    patients: [...patientMap.values()].sort((left, right) =>
+      `${left.bed}|${left.name}`.localeCompare(`${right.bed}|${right.name}`, "zh-Hant")
+    ),
+    activePatientId: local.activePatientId,
+    completedPurchases: { ...remote.completedPurchases, ...local.completedPurchases },
+    completedDistribution: { ...remote.completedDistribution, ...local.completedDistribution },
+    historyLogs: [...logMap.values()].sort((left, right) => left.date.localeCompare(right.date)),
+    balanceTransactions: [...transactionMap.values()]
+  });
+
+  refreshCurrentHistoryLog(reconciled);
+  return reconciled;
+}
+
+function newerEntity(localEntity, remoteEntity) {
+  const localTime = String(localEntity?.updatedAt || localEntity?.createdAt || "");
+  const remoteTime = String(remoteEntity?.updatedAt || remoteEntity?.createdAt || "");
+  return localTime > remoteTime ? localEntity : remoteEntity;
+}
+
+function refreshCurrentHistoryLog(targetState) {
+  const date = targetState.session.date || getTodayDate();
+  const patientTotals = targetState.patients.map((patient) => ({
+    patientId: patient.id,
+    bed: patient.bed,
+    name: patient.name,
+    total: patient.cart.reduce((sum, entry) => sum + Number(entry.price || 0) * Number(entry.quantity || 0), 0),
+    itemsCount: patient.cart.reduce((sum, entry) => sum + Number(entry.quantity || 0), 0)
+  })).filter((entry) => entry.total > 0 || entry.itemsCount > 0);
+  const logIndex = targetState.historyLogs.findIndex((log) => log.date === date);
+
+  if (!patientTotals.length) {
+    if (logIndex >= 0) targetState.historyLogs.splice(logIndex, 1);
+    return;
+  }
+
+  const latestUpdate = targetState.patients.reduce((latest, patient) =>
+    String(patient.updatedAt || "") > latest ? String(patient.updatedAt) : latest,
+  String(targetState.session.updatedAt || ""));
+  const log = {
+    date,
+    note: targetState.session.note || "",
+    totalAmount: patientTotals.reduce((sum, entry) => sum + entry.total, 0),
+    patientTotals,
+    updatedAt: latestUpdate || new Date().toISOString()
+  };
+  if (logIndex >= 0) targetState.historyLogs[logIndex] = log;
+  else targetState.historyLogs.push(log);
+  targetState.historyLogs.sort((left, right) => left.date.localeCompare(right.date));
 }
 
 async function buildStorageAdapter() {
@@ -1484,8 +1749,7 @@ function createSupabaseStorageAdapter(createClient, localAdapter) {
     return data;
   }
 
-  async function saveRemote(nextState) {
-    const mergedState = mergeState(nextState);
+  async function upsertRemote(mergedState) {
     const updatedAt = new Date().toISOString();
     const { error } = await client.from("shared_sessions").upsert(
       {
@@ -1501,7 +1765,28 @@ function createSupabaseStorageAdapter(createClient, localAdapter) {
     }
 
     lastRemoteUpdatedAt = updatedAt;
+  }
+
+  async function saveRemote(nextState) {
+    const remoteBeforeSave = await fetchRow();
+    let mergedState = remoteBeforeSave?.payload
+      ? reconcileSharedState(nextState, remoteBeforeSave.payload)
+      : mergeState(nextState);
+    await upsertRemote(mergedState);
+
+    const remoteAfterSave = await fetchRow();
+    if (remoteAfterSave?.payload) {
+      const verifiedState = reconcileSharedState(mergedState, remoteAfterSave.payload);
+      if (JSON.stringify(verifiedState) !== JSON.stringify(mergeState(remoteAfterSave.payload))) {
+        mergedState = verifiedState;
+        await upsertRemote(mergedState);
+      } else {
+        mergedState = verifiedState;
+      }
+    }
+
     backupLocalState(mergedState);
+    return mergedState;
   }
 
   return {
@@ -1513,8 +1798,9 @@ function createSupabaseStorageAdapter(createClient, localAdapter) {
         const remoteRow = await fetchRow();
         if (remoteRow?.payload) {
           lastRemoteUpdatedAt = remoteRow.updated_at || "";
-          backupLocalState(remoteRow.payload);
-          return mergeState(remoteRow.payload);
+          const reconciledState = reconcileSharedState(localState, remoteRow.payload);
+          backupLocalState(reconciledState);
+          return reconciledState;
         }
 
         if (localState.patients.length > 0) {
@@ -1529,7 +1815,7 @@ function createSupabaseStorageAdapter(createClient, localAdapter) {
       }
     },
     async saveState(nextState) {
-      await saveRemote(nextState);
+      return saveRemote(nextState);
     },
     async fetchRemoteState() {
       try {
@@ -1539,7 +1825,6 @@ function createSupabaseStorageAdapter(createClient, localAdapter) {
         }
 
         lastRemoteUpdatedAt = remoteRow.updated_at || lastRemoteUpdatedAt;
-        backupLocalState(remoteRow.payload);
         return mergeState(remoteRow.payload);
       } catch (error) {
         console.error("無法重新整理雲端資料", error);
@@ -1559,7 +1844,6 @@ function createSupabaseStorageAdapter(createClient, localAdapter) {
           }
 
           lastRemoteUpdatedAt = remoteRow.updated_at || lastRemoteUpdatedAt;
-          backupLocalState(remoteRow.payload);
           onRemoteState(remoteRow.payload);
         } catch (error) {
           console.error("雲端輪詢失敗", error);
