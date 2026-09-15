@@ -119,6 +119,7 @@ const syncConfig = {
   pollIntervalMs: Number(appConfig.sync?.pollIntervalMs || 5000)
 };
 const defaultMonthlyAlertThreshold = 1000;
+const dataVersion = 2;
 const rosterVersion = 1;
 const initialRoster = [
   { bed: "P1-04", name: "高X源", shoppingLimit: 100 },
@@ -150,12 +151,15 @@ const defaultState = {
     updatedAt: ""
   },
   patients: [],
+  patientDirectory: [],
+  dailySessions: {},
   activePatientId: null,
   completedPurchases: {},
   completedDistribution: {},
   historyLogs: [],
   balanceTransactions: [],
-  rosterVersion: 0
+  rosterVersion: 0,
+  dataVersion: 0
 };
 
 let state = structuredClone(defaultState);
@@ -167,6 +171,8 @@ let storageAdapter = null;
 let saveTimerId = null;
 let syncIntervalId = null;
 let isInitialized = false;
+let historyEditing = false;
+let historyLockedDate = null;
 let syncBannerState = {
   title: "同步模式：本機",
   message: "目前資料只存在本機瀏覽器。",
@@ -175,7 +181,6 @@ let syncBannerState = {
 
 const elements = {
   shoppingDate: document.querySelector("#shopping-date"),
-  budgetLimit: document.querySelector("#budget-limit"),
   sessionNote: document.querySelector("#session-note"),
   patientForm: document.querySelector("#patient-form"),
   patientBed: document.querySelector("#patient-bed"),
@@ -184,6 +189,10 @@ const elements = {
   patientShoppingLimit: document.querySelector("#patient-shopping-limit"),
   rosterImportText: document.querySelector("#roster-import-text"),
   importRoster: document.querySelector("#import-roster"),
+  directoryList: document.querySelector("#directory-list"),
+  dailyPatientSelect: document.querySelector("#daily-patient-select"),
+  addDailyPatient: document.querySelector("#add-daily-patient"),
+  dateStatus: document.querySelector("#date-status"),
   syncBanner: document.querySelector("#sync-banner"),
   syncTitle: document.querySelector("#sync-title"),
   syncMessage: document.querySelector("#sync-message"),
@@ -226,7 +235,8 @@ const elements = {
   printReport: document.querySelector("#print-report"),
   statPatients: document.querySelector("#stat-patients"),
   statOrders: document.querySelector("#stat-orders"),
-  statTotal: document.querySelector("#stat-total")
+  statTotal: document.querySelector("#stat-total"),
+  printSheet: document.querySelector("#print-sheet")
 };
 
 initialize();
@@ -235,6 +245,7 @@ async function initialize() {
   storageAdapter = await buildStorageAdapter();
   state = await storageAdapter.loadState();
   normalizeState();
+  const dataChanged = migrateToDailySessions();
   const rosterChanged = applyInitialRoster();
   bindSessionForm();
   bindPatientForm();
@@ -251,62 +262,209 @@ async function initialize() {
   }
 
   isInitialized = true;
-  if (rosterChanged) persist();
+  if (dataChanged || rosterChanged) persist();
 }
 
 function bindSessionForm() {
   elements.shoppingDate.value = state.session.date;
-  elements.budgetLimit.value = state.session.budgetLimit;
   elements.sessionNote.value = state.session.note;
   elements.monthAlertThreshold.value = String(state.session.monthlyAlertThreshold || defaultMonthlyAlertThreshold);
   elements.weekReferenceDate.value = state.session.date;
   elements.monthReference.value = toMonthValue(state.session.date);
   elements.yearReference.value = String(new Date(`${state.session.date}T00:00:00`).getFullYear());
 
-  [elements.shoppingDate, elements.budgetLimit, elements.sessionNote].forEach((input) => {
-    input.addEventListener("input", () => {
-      state.session.date = elements.shoppingDate.value;
-      state.session.budgetLimit = Number(elements.budgetLimit.value || 0);
-      state.session.note = elements.sessionNote.value.trim();
-      state.session.updatedAt = new Date().toISOString();
-      if (!elements.weekReferenceDate.value) {
-        elements.weekReferenceDate.value = state.session.date;
-      }
-      if (!elements.monthReference.value) {
-        elements.monthReference.value = toMonthValue(state.session.date);
-      }
-      persist();
-      render();
-    });
+  elements.shoppingDate.addEventListener("change", () => {
+    changeShoppingDate(elements.shoppingDate.value);
   });
+
+  elements.sessionNote.addEventListener("input", () => {
+    if (!ensureDateEditable()) return;
+    state.session.note = elements.sessionNote.value.trim();
+    state.session.updatedAt = new Date().toISOString();
+    persist();
+    renderPageContext();
+    renderReports();
+  });
+}
+
+function migrateToDailySessions() {
+  if (Number(state.dataVersion || 0) >= dataVersion) {
+    loadDailySession(state.session.date, false);
+    return false;
+  }
+
+  const migrationTime = new Date().toISOString();
+  const legacyPatients = Array.isArray(state.patients) ? state.patients : [];
+  const directoryMap = new Map((state.patientDirectory || []).map((patient) => [patient.id, patient]));
+  legacyPatients.forEach((patient) => {
+    if (!directoryMap.has(patient.id)) {
+      directoryMap.set(patient.id, {
+        id: patient.id,
+        bed: patient.bed,
+        name: maskPatientName(patient.name),
+        balance: Number(patient.balance || 0) - Number(patient.confirmedTotal || 0),
+        shoppingLimit: Number.isFinite(Number(patient.shoppingLimit)) ? Number(patient.shoppingLimit) : 100,
+        updatedAt: patient.updatedAt || migrationTime
+      });
+    }
+  });
+  state.patientDirectory = [...directoryMap.values()];
+  sortPatientDirectory();
+
+  const dailyPatients = legacyPatients.filter((patient) =>
+    (Array.isArray(patient.cart) && patient.cart.length) || Number(patient.confirmedTotal || 0) > 0
+  );
+  state.patients = dailyPatients;
+  if (dailyPatients.length) saveCurrentDailySession();
+  state.activePatientId = dailyPatients.some((patient) => patient.id === state.activePatientId)
+    ? state.activePatientId
+    : dailyPatients[0]?.id || null;
+  state.dataVersion = dataVersion;
+  return true;
+}
+
+function sortPatientDirectory() {
+  state.patientDirectory.sort((left, right) =>
+    normalizeBed(left.bed).localeCompare(normalizeBed(right.bed), "zh-Hant", { numeric: true })
+  );
+}
+
+function getDirectoryPatient(patientId) {
+  return state.patientDirectory.find((patient) => patient.id === patientId) || null;
+}
+
+function normalizeDailyPatient(patient) {
+  return {
+    id: patient.id,
+    bed: patient.bed || "",
+    name: maskPatientName(patient.name),
+    balance: Number(patient.balance || 0),
+    shoppingLimit: Number.isFinite(Number(patient.shoppingLimit)) ? Math.max(0, Number(patient.shoppingLimit)) : 100,
+    cart: Array.isArray(patient.cart) ? patient.cart.map((entry) => ({ ...entry })) : [],
+    confirmedTotal: Number(patient.confirmedTotal || 0),
+    confirmedAt: patient.confirmedAt || "",
+    updatedAt: patient.updatedAt || ""
+  };
+}
+
+function saveCurrentDailySession() {
+  const date = state.session.date || getTodayDate();
+  const previous = state.dailySessions[date] || {};
+  state.dailySessions[date] = {
+    date,
+    note: state.session.note || "",
+    patients: state.patients.map(normalizeDailyPatient),
+    completedPurchases: { ...state.completedPurchases },
+    completedDistribution: { ...state.completedDistribution },
+    updatedAt: newerTimestamp(previous.updatedAt, state.session.updatedAt,
+      ...state.patients.map((patient) => patient.updatedAt)) || new Date().toISOString()
+  };
+}
+
+function loadDailySession(date, resetEditing = true) {
+  const dailySession = state.dailySessions?.[date];
+  state.session.date = date;
+  state.session.note = dailySession?.note || "";
+  state.patients = Array.isArray(dailySession?.patients)
+    ? dailySession.patients.map(normalizeDailyPatient)
+    : [];
+  state.completedPurchases = { ...(dailySession?.completedPurchases || {}) };
+  state.completedDistribution = { ...(dailySession?.completedDistribution || {}) };
+  state.activePatientId = state.patients.some((patient) => patient.id === state.activePatientId)
+    ? state.activePatientId
+    : state.patients[0]?.id || null;
+  if (resetEditing) {
+    historyEditing = false;
+    historyLockedDate = date < getTodayDate() && Boolean(dailySession) &&
+      (Boolean(dailySession.note) || Boolean(dailySession.patients?.length)) ? date : null;
+  }
+}
+
+function changeShoppingDate(nextDate) {
+  const date = nextDate || getTodayDate();
+  saveCurrentDailySession();
+  syncCurrentSessionToHistory();
+  loadDailySession(date);
+  state.session.updatedAt = new Date().toISOString();
+  elements.sessionNote.value = state.session.note;
+  elements.weekReferenceDate.value = date;
+  elements.monthReference.value = toMonthValue(date);
+  elements.yearReference.value = String(new Date(`${date}T00:00:00`).getFullYear());
+  persist();
+  render();
+}
+
+function addPatientToCurrentDate(patientId) {
+  if (!ensureDateEditable()) return;
+  const directoryPatient = getDirectoryPatient(patientId);
+  if (!directoryPatient || state.patients.some((patient) => patient.id === patientId)) return;
+  const now = new Date().toISOString();
+  state.patients.push(normalizeDailyPatient({
+    ...directoryPatient,
+    balance: directoryPatient.balance,
+    shoppingLimit: Number.isFinite(Number(directoryPatient.shoppingLimit)) ? directoryPatient.shoppingLimit : 100,
+    cart: [],
+    updatedAt: now
+  }));
+  state.patients.sort((left, right) => normalizeBed(left.bed).localeCompare(normalizeBed(right.bed), "zh-Hant", { numeric: true }));
+  state.activePatientId = patientId;
+  state.session.updatedAt = now;
+  persist();
+  render();
+  showToast(`${directoryPatient.bed}床 ${directoryPatient.name} 已加入 ${state.session.date} 購物名單。`);
+}
+
+function isHistoryLocked() {
+  return state.session.date === historyLockedDate && !historyEditing;
+}
+
+function ensureDateEditable() {
+  if (!isHistoryLocked()) return true;
+  showToast("這是過去日期的紀錄，請先按「編輯此日資料」。", "warning");
+  return false;
+}
+
+function newerTimestamp(...values) {
+  return values.filter(Boolean).sort().at(-1) || "";
 }
 
 function bindPatientForm() {
   elements.patientForm.addEventListener("submit", (event) => {
     event.preventDefault();
 
+    const bed = elements.patientBed.value.trim().toUpperCase();
+    const existing = state.patientDirectory.find((patient) => normalizeBed(patient.bed) === normalizeBed(bed));
+    if (existing) {
+      showToast(`${bed} 已存在病人名單中。`, "warning");
+      return;
+    }
+
     const patient = {
       id: crypto.randomUUID(),
-      bed: elements.patientBed.value.trim(),
+      bed,
       name: maskPatientName(elements.patientName.value),
       balance: Number(elements.patientBalance.value || 0),
-      shoppingLimit: Number(elements.patientShoppingLimit.value || state.session.budgetLimit || 100),
-      cart: [],
+      shoppingLimit: Number(elements.patientShoppingLimit.value || 100),
       updatedAt: new Date().toISOString()
     };
 
-    state.patients.push(patient);
-    state.activePatientId = patient.id;
+    state.patientDirectory.push(patient);
+    sortPatientDirectory();
     elements.patientForm.reset();
-    elements.patientBalance.value = state.session.budgetLimit || 100;
-    elements.patientShoppingLimit.value = state.session.budgetLimit || 100;
+    elements.patientBalance.value = 0;
+    elements.patientShoppingLimit.value = 100;
     persist();
     render();
+    showToast(`${patient.bed}床 ${patient.name} 已加入病人名單。`);
   });
 }
 
 function bindPatientOverviewInteraction() {
   elements.patientOverview.addEventListener("submit", (event) => {
+    if (!ensureDateEditable()) {
+      event.preventDefault();
+      return;
+    }
     const balanceForm = event.target.closest("#balance-entry-form");
     if (balanceForm) {
       event.preventDefault();
@@ -325,25 +483,26 @@ function bindPatientOverviewInteraction() {
       return;
     }
 
-    const bed = form.querySelector("#edit-patient-bed")?.value.trim() || "";
-    const name = maskPatientName(form.querySelector("#edit-patient-name")?.value || "");
-    const balance = Number(form.querySelector("#edit-patient-balance")?.value || 0);
     const shoppingLimit = Number(form.querySelector("#edit-patient-shopping-limit")?.value || 0);
-    if (!bed || !name || balance < 0 || shoppingLimit < 0) {
+    if (shoppingLimit < 0) {
       return;
     }
 
-    patient.bed = bed;
-    patient.name = name;
-    patient.balance = balance;
     patient.shoppingLimit = shoppingLimit;
     markPatientUpdated(patient);
+    const directoryPatient = getDirectoryPatient(patient.id);
+    if (directoryPatient) {
+      directoryPatient.shoppingLimit = shoppingLimit;
+      directoryPatient.updatedAt = patient.updatedAt;
+    }
     persist();
     render();
+    showToast(`${patient.bed}床本次購物上限已更新為 NT$${shoppingLimit}。`);
   });
 }
 
 function addBalanceEntry(form) {
+  if (!ensureDateEditable()) return;
   const patient = getActivePatient();
   if (!patient) return;
 
@@ -357,6 +516,11 @@ function addBalanceEntry(form) {
 
   patient.balance += Math.floor(amount);
   markPatientUpdated(patient);
+  const directoryPatient = getDirectoryPatient(patient.id);
+  if (directoryPatient) {
+    directoryPatient.balance += Math.floor(amount);
+    directoryPatient.updatedAt = patient.updatedAt;
+  }
   state.balanceTransactions.push({
     id: crypto.randomUUID(),
     patientId: patient.id,
@@ -365,7 +529,7 @@ function addBalanceEntry(form) {
     date,
     type: "deposit",
     amount: Math.floor(amount),
-    balanceAfter: patient.balance,
+    balanceAfter: directoryPatient?.balance ?? patient.balance,
     note,
     createdAt: new Date().toISOString()
   });
@@ -375,6 +539,10 @@ function addBalanceEntry(form) {
 }
 
 function bindToolbar() {
+  elements.addDailyPatient.addEventListener("click", () => {
+    addPatientToCurrentDate(elements.dailyPatientSelect.value);
+  });
+
   elements.patientSelector.addEventListener("change", (event) => {
     state.activePatientId = event.target.value;
     persist();
@@ -387,6 +555,13 @@ function bindToolbar() {
     state.activePatientId = button.dataset.patientId;
     persist();
     render();
+  });
+
+  elements.dateStatus.addEventListener("click", (event) => {
+    if (!event.target.closest("#edit-history-date")) return;
+    historyEditing = true;
+    render();
+    showToast(`已開啟 ${state.session.date} 的編輯模式。`, "warning");
   });
 
   elements.productSearch.addEventListener("input", () => {
@@ -449,6 +624,7 @@ function bindToolbar() {
   });
 
   elements.printReport.addEventListener("click", () => {
+    renderPrintSheet();
     window.print();
   });
 }
@@ -531,6 +707,8 @@ function bindCatalogInteraction() {
       return;
     }
 
+    if (!ensureDateEditable()) return;
+
     addProductToActivePatient(card.dataset.productName);
   });
 }
@@ -542,6 +720,8 @@ function bindCartInteraction() {
       return;
     }
 
+    if (!ensureDateEditable()) return;
+
     updateCartItem(button.dataset.productName, button.dataset.action);
   });
 
@@ -551,10 +731,13 @@ function bindCartInteraction() {
       return;
     }
 
+    if (!ensureDateEditable()) return;
+
     updateCartItem(input.dataset.productName, "set-quantity", input.value);
   });
 
   elements.clearCart.addEventListener("click", () => {
+    if (!ensureDateEditable()) return;
     const patient = getActivePatient();
     if (!patient || patient.cart.length === 0) return;
     if (!window.confirm(`確定要清空 ${patient.bed}床 ${patient.name} 的全部購物品項嗎？`)) return;
@@ -566,6 +749,7 @@ function bindCartInteraction() {
   });
 
   elements.confirmOrder.addEventListener("click", () => {
+    if (!ensureDateEditable()) return;
     const patient = getActivePatient();
     if (!patient || patient.cart.length === 0) {
       showToast("請先選擇病人並加入商品。", "warning");
@@ -578,7 +762,30 @@ function bindCartInteraction() {
       return;
     }
 
-    showToast(`已確認 ${patient.bed}床 ${patient.name}，共 NT$${total}。`);
+    const previousTotal = Number(patient.confirmedTotal || 0);
+    const difference = total - previousTotal;
+    const directoryPatient = getDirectoryPatient(patient.id);
+    if (directoryPatient && difference !== 0) {
+      directoryPatient.balance -= difference;
+      directoryPatient.shoppingLimit = getPatientLimit(patient);
+      directoryPatient.updatedAt = new Date().toISOString();
+      state.balanceTransactions.push({
+        id: crypto.randomUUID(),
+        patientId: patient.id,
+        bed: patient.bed,
+        name: patient.name,
+        date: state.session.date,
+        type: "purchase",
+        amount: -difference,
+        balanceAfter: directoryPatient.balance,
+        note: previousTotal ? "購物金額調整" : "本次購物支出",
+        createdAt: directoryPatient.updatedAt
+      });
+    }
+    patient.confirmedTotal = total;
+    patient.confirmedAt = new Date().toISOString();
+    markPatientUpdated(patient);
+    showToast(`已確認 ${patient.bed}床 ${patient.name}，共 NT$${total}，零用金餘額 NT$${patient.balance - total}。`);
     syncCurrentSessionToHistory();
     persist();
     document.querySelector("#reports")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -591,9 +798,14 @@ function bindReportInteraction() {
     if (!checkbox) {
       return;
     }
+    if (!ensureDateEditable()) {
+      checkbox.checked = !checkbox.checked;
+      return;
+    }
 
     const productName = checkbox.dataset.purchaseName;
     state.completedPurchases[productName] = checkbox.checked;
+    state.session.updatedAt = new Date().toISOString();
     persist();
     renderReports();
   });
@@ -603,16 +815,25 @@ function bindReportInteraction() {
     if (!checkbox) {
       return;
     }
+    if (!ensureDateEditable()) {
+      checkbox.checked = !checkbox.checked;
+      return;
+    }
 
     const patientId = checkbox.dataset.distributionId;
     state.completedDistribution[patientId] = checkbox.checked;
+    state.session.updatedAt = new Date().toISOString();
     persist();
     renderReports();
   });
 }
 
 function render() {
+  saveCurrentDailySession();
   syncCurrentSessionToHistory();
+  renderDirectoryList();
+  renderDailyPatientPicker();
+  renderDateStatus();
   renderPatientSelector();
   renderPatientQuickNav();
   renderPatientOverview();
@@ -623,6 +844,46 @@ function render() {
   renderPeriodReports();
   renderHeroStats();
   renderPageContext();
+  renderPrintSheet();
+}
+
+function renderDirectoryList() {
+  if (!state.patientDirectory.length) {
+    elements.directoryList.className = "directory-list empty-state";
+    elements.directoryList.textContent = "尚未建立病人名單。";
+    return;
+  }
+  elements.directoryList.className = "directory-list";
+  elements.directoryList.innerHTML = state.patientDirectory.map((patient) => `
+    <span class="directory-chip"><strong>${patient.bed}</strong> ${patient.name}
+      <small>餘額 NT$${patient.balance}／預設上限 NT$${patient.shoppingLimit || 100}</small>
+    </span>`).join("");
+}
+
+function renderDailyPatientPicker() {
+  const currentIds = new Set(state.patients.map((patient) => patient.id));
+  const available = state.patientDirectory.filter((patient) => !currentIds.has(patient.id));
+  elements.dailyPatientSelect.innerHTML = available.length
+    ? available.map((patient) => `<option value="${patient.id}">${patient.bed}床 ${patient.name}（餘額 NT$${patient.balance}／上限 NT$${patient.shoppingLimit || 100}）</option>`).join("")
+    : '<option value="">沒有可加入的病人</option>';
+  elements.addDailyPatient.disabled = !available.length || isHistoryLocked();
+}
+
+function renderDateStatus() {
+  const daily = state.dailySessions[state.session.date];
+  const saved = Boolean(daily && (daily.note || daily.patients?.length));
+  const isPast = state.session.date < getTodayDate();
+  elements.sessionNote.disabled = isHistoryLocked();
+  if (isHistoryLocked()) {
+    elements.dateStatus.className = "date-status is-history";
+    elements.dateStatus.innerHTML = `<strong>已叫出 ${state.session.date} 的過去輸入資料（唯讀）</strong><span>如需更正，請先明確開啟編輯。</span><button id="edit-history-date" type="button" class="secondary-button">編輯此日資料</button>`;
+  } else if (isPast && historyEditing) {
+    elements.dateStatus.className = "date-status is-editing";
+    elements.dateStatus.innerHTML = `<strong>正在編輯 ${state.session.date} 的過去資料</strong><span>修改會同步更新日／週／月／年報。</span>`;
+  } else {
+    elements.dateStatus.className = "date-status";
+    elements.dateStatus.innerHTML = `<strong>${saved ? "已載入此日購物資料" : "此日期尚無資料"}</strong><span>${saved ? `目前有 ${state.patients.length} 位購物病人。` : "請從下方選單加入本次購物病人。"}</span>`;
+  }
 }
 
 function renderPageContext() {
@@ -677,7 +938,7 @@ function renderPatientOverview() {
 
   if (!patient) {
     elements.patientOverview.className = "patient-overview empty-state";
-    elements.patientOverview.textContent = "請先新增病人。";
+    elements.patientOverview.textContent = "請先從 Step 2 加入本次購物病人。";
     return;
   }
 
@@ -710,18 +971,17 @@ function renderPatientOverview() {
     <p class="summary-meta">
       ${overBudget ? "已超過病人零用金或本次購物上限，請調整品項。" : "目前金額在可支出範圍內。"}
     </p>
-    <form id="edit-patient-form" class="patient-edit-form" aria-label="修改病人資料">
-      <input id="edit-patient-bed" type="text" maxlength="10" value="${patient.bed}" required />
-      <input id="edit-patient-name" type="text" maxlength="30" value="${patient.name}" required />
-      <input id="edit-patient-balance" type="number" min="0" step="1" value="${patient.balance}" required />
-      <input id="edit-patient-shopping-limit" type="number" min="0" step="1" value="${patientLimit}" aria-label="個別購物上限" required />
-      <button type="submit" class="secondary-button">更新病人資料</button>
+    <form id="edit-patient-form" class="patient-edit-form" aria-label="修改本次購物上限">
+      <label>本次購物上限
+        <input id="edit-patient-shopping-limit" type="number" min="0" step="1" value="${patientLimit}" required ${isHistoryLocked() ? "disabled" : ""} />
+      </label>
+      <button type="submit" class="secondary-button" ${isHistoryLocked() ? "disabled" : ""}>更新本次上限</button>
     </form>
     <form id="balance-entry-form" class="balance-entry-form" aria-label="零用金入帳">
-      <input id="balance-entry-date" type="date" value="${state.session.date || getTodayDate()}" required />
-      <input id="balance-entry-amount" type="number" min="1" step="1" placeholder="入帳金額" required />
-      <input id="balance-entry-note" type="text" maxlength="50" placeholder="備註，例如：家屬存入" />
-      <button type="submit" class="secondary-button">零用金入帳</button>
+      <input id="balance-entry-date" type="date" value="${state.session.date || getTodayDate()}" required ${isHistoryLocked() ? "disabled" : ""} />
+      <input id="balance-entry-amount" type="number" min="1" step="1" placeholder="入帳金額" required ${isHistoryLocked() ? "disabled" : ""} />
+      <input id="balance-entry-note" type="text" maxlength="50" placeholder="備註，例如：家屬存入" ${isHistoryLocked() ? "disabled" : ""} />
+      <button type="submit" class="secondary-button" ${isHistoryLocked() ? "disabled" : ""}>零用金入帳</button>
     </form>
     ${renderBalanceHistory(patient)}
   `;
@@ -735,9 +995,9 @@ function renderBalanceHistory(patient) {
   if (!entries.length) return "";
 
   return `<div class="balance-history">
-    <strong>最近零用金入帳</strong>
+    <strong>最近零用金收支</strong>
     <div class="summary-meta">${entries.map((entry) =>
-      `${entry.date}　+NT$${entry.amount}　${entry.note}（餘額 NT$${entry.balanceAfter}）`
+      `${entry.date}　${entry.amount >= 0 ? "+" : "−"}NT$${Math.abs(entry.amount)}　${entry.note}（餘額 NT$${entry.balanceAfter}）`
     ).join("<br>")}</div>
   </div>`;
 }
@@ -783,7 +1043,7 @@ function renderCatalog() {
   const keyword = elements.productSearch.value.trim().toLowerCase();
 
   if (!patient) {
-    elements.catalogGroups.innerHTML = '<div class="empty-state">新增病人後即可開始選購。</div>';
+    elements.catalogGroups.innerHTML = '<div class="empty-state">從 Step 2 加入本次購物病人後即可開始選購。</div>';
     return;
   }
 
@@ -1002,6 +1262,49 @@ function renderReports() {
     .join("");
 }
 
+function renderPrintSheet() {
+  const aggregate = new Map();
+  state.patients.forEach((patient) => {
+    patient.cart.forEach((entry) => {
+      const current = aggregate.get(entry.name) || { quantity: 0, price: Number(entry.price || 0) };
+      current.quantity += Number(entry.quantity || 0);
+      aggregate.set(entry.name, current);
+    });
+  });
+  const itemRows = [...aggregate.entries()]
+    .sort((left, right) => left[0].localeCompare(right[0], "zh-Hant"))
+    .map(([name, entry], index) => `<tr><td>${index + 1}</td><td>${name}</td><td>${entry.price}</td><td>${entry.quantity}</td><td>${entry.price * entry.quantity}</td></tr>`)
+    .join("");
+  const patientRows = state.patients.map((patient, index) => {
+    const total = getPatientTotal(patient);
+    const items = patient.cart.length
+      ? patient.cart.map((entry) => `${entry.name}×${entry.quantity}`).join("、")
+      : "尚未選購";
+    return `<tr><td>${index + 1}</td><td>${patient.bed}</td><td>${patient.name}</td><td class="print-items">${items}</td><td>${total}</td><td>${patient.balance - total}</td></tr>`;
+  }).join("");
+  const totalPieces = state.patients.reduce((sum, patient) =>
+    sum + patient.cart.reduce((patientSum, entry) => patientSum + Number(entry.quantity || 0), 0), 0);
+  const totalAmount = state.patients.reduce((sum, patient) => sum + getPatientTotal(patient), 0);
+
+  elements.printSheet.innerHTML = `
+    <header class="print-header">
+      <h1>精神科購物管理系統｜每日購物總表</h1>
+      <p>日期：${state.session.date}　病人：${state.patients.length} 人　件數：${totalPieces} 件　總金額：NT$${totalAmount}</p>
+      ${state.session.note ? `<p>備註：${state.session.note}</p>` : ""}
+    </header>
+    <section>
+      <h2>採買品項總表</h2>
+      <table><thead><tr><th>序</th><th>品項</th><th>單價</th><th>數量</th><th>小計</th></tr></thead>
+      <tbody>${itemRows || '<tr><td colspan="5">本日尚無購物品項</td></tr>'}</tbody></table>
+    </section>
+    <section>
+      <h2>病人分發總表</h2>
+      <table><thead><tr><th>序</th><th>床號</th><th>姓名</th><th>購物內容</th><th>金額</th><th>餘額</th></tr></thead>
+      <tbody>${patientRows || '<tr><td colspan="6">本日尚無購物病人</td></tr>'}</tbody></table>
+    </section>
+    <footer class="print-signatures"><span>採買人員：____________</span><span>覆核人員：____________</span></footer>`;
+}
+
 function renderHeroStats() {
   const totalPatients = state.patients.length;
   const totalOrders = state.patients.reduce((sum, patient) => {
@@ -1015,6 +1318,7 @@ function renderHeroStats() {
 }
 
 function addProductToActivePatient(productName) {
+  if (!ensureDateEditable()) return;
   const patient = getActivePatient();
   const product = findProduct(productName);
 
@@ -1035,6 +1339,7 @@ function addProductToActivePatient(productName) {
 }
 
 function addCustomItemToActivePatient() {
+  if (!ensureDateEditable()) return;
   const patient = getActivePatient();
   if (!patient) {
     return;
@@ -1066,7 +1371,7 @@ function importRosterFromText() {
     return;
   }
 
-  const patientByBed = new Map(state.patients.map((patient) => [normalizeBed(patient.bed), patient]));
+  const patientByBed = new Map(state.patientDirectory.map((patient) => [normalizeBed(patient.bed), patient]));
   let added = 0;
   let updated = 0;
 
@@ -1078,7 +1383,15 @@ function importRosterFromText() {
       existing.name = record.name;
       if (record.balance !== null) existing.balance = record.balance;
       if (record.shoppingLimit !== null) existing.shoppingLimit = record.shoppingLimit;
-      markPatientUpdated(existing);
+      existing.updatedAt = new Date().toISOString();
+      const dailyPatient = state.patients.find((patient) => patient.id === existing.id);
+      if (dailyPatient) {
+        dailyPatient.bed = existing.bed;
+        dailyPatient.name = existing.name;
+        if (record.balance !== null) dailyPatient.balance = record.balance;
+        if (record.shoppingLimit !== null) dailyPatient.shoppingLimit = record.shoppingLimit;
+        markPatientUpdated(dailyPatient);
+      }
       updated += 1;
       return;
     }
@@ -1088,17 +1401,15 @@ function importRosterFromText() {
       bed: record.bed,
       name: record.name,
       balance: record.balance ?? 0,
-      shoppingLimit: record.shoppingLimit ?? Number(state.session.budgetLimit || 100),
-      cart: [],
+      shoppingLimit: record.shoppingLimit ?? 100,
       updatedAt: new Date().toISOString()
     };
-    state.patients.push(patient);
+    state.patientDirectory.push(patient);
     patientByBed.set(bedKey, patient);
     added += 1;
   });
 
-  state.patients.sort((left, right) => normalizeBed(left.bed).localeCompare(normalizeBed(right.bed), "zh-Hant", { numeric: true }));
-  if (!state.activePatientId && state.patients.length) state.activePatientId = state.patients[0].id;
+  sortPatientDirectory();
   elements.rosterImportText.value = "";
   persist();
   render();
@@ -1154,7 +1465,7 @@ function maskPatientName(value) {
 function applyInitialRoster() {
   if (Number(state.rosterVersion || 0) >= rosterVersion) return false;
 
-  const patientByBed = new Map(state.patients.map((patient) => [normalizeBed(patient.bed), patient]));
+  const patientByBed = new Map(state.patientDirectory.map((patient) => [normalizeBed(patient.bed), patient]));
   const migrationTime = new Date().toISOString();
 
   initialRoster.forEach((record) => {
@@ -1174,15 +1485,13 @@ function applyInitialRoster() {
       name: record.name,
       balance: 0,
       shoppingLimit: record.shoppingLimit,
-      cart: [],
       updatedAt: migrationTime
     };
-    state.patients.push(patient);
+    state.patientDirectory.push(patient);
     patientByBed.set(bedKey, patient);
   });
 
-  state.patients.sort((left, right) => normalizeBed(left.bed).localeCompare(normalizeBed(right.bed), "zh-Hant", { numeric: true }));
-  if (!state.activePatientId && state.patients.length) state.activePatientId = state.patients[0].id;
+  sortPatientDirectory();
   state.rosterVersion = rosterVersion;
   return true;
 }
@@ -1565,8 +1874,6 @@ function syncCurrentSessionToHistory() {
   const existingIndex = logs.findIndex((entry) => entry.date === nextDate);
 
   if (!patientTotals.length) {
-    if (existingIndex >= 0) logs.splice(existingIndex, 1);
-    state.historyLogs = logs;
     return;
   }
 
@@ -1685,6 +1992,7 @@ function persist() {
     return;
   }
 
+  saveCurrentDailySession();
   syncCurrentSessionToHistory();
   backupLocalState(state);
   if (saveTimerId) {
@@ -1715,6 +2023,28 @@ function backupLocalState(nextState) {
 
 function mergeState(nextState) {
   const parsed = nextState || {};
+  const normalizeDirectory = (patient) => ({
+    id: patient.id,
+    bed: patient.bed || "",
+    name: maskPatientName(patient.name),
+    balance: Number(patient.balance || 0),
+    shoppingLimit: Number.isFinite(Number(patient.shoppingLimit)) ? Math.max(0, Number(patient.shoppingLimit)) : 100,
+    updatedAt: patient.updatedAt || ""
+  });
+  const normalizeStoredDailyPatient = (patient) => ({
+    ...normalizeDirectory(patient),
+    cart: Array.isArray(patient.cart) ? patient.cart : [],
+    confirmedTotal: Number(patient.confirmedTotal || 0),
+    confirmedAt: patient.confirmedAt || ""
+  });
+  const dailySessions = Object.fromEntries(Object.entries(parsed.dailySessions || {}).map(([date, daily]) => [date, {
+    date,
+    note: daily?.note || "",
+    patients: Array.isArray(daily?.patients) ? daily.patients.map(normalizeStoredDailyPatient) : [],
+    completedPurchases: { ...(daily?.completedPurchases || {}) },
+    completedDistribution: { ...(daily?.completedDistribution || {}) },
+    updatedAt: daily?.updatedAt || ""
+  }]));
   return {
     ...structuredClone(defaultState),
     ...parsed,
@@ -1776,20 +2106,31 @@ function mergeState(nextState) {
           updatedAt: patient.updatedAt || ""
         }))
       : [],
-    rosterVersion: Number(parsed.rosterVersion || 0)
+    patientDirectory: Array.isArray(parsed.patientDirectory) ? parsed.patientDirectory.map(normalizeDirectory) : [],
+    dailySessions,
+    rosterVersion: Number(parsed.rosterVersion || 0),
+    dataVersion: Number(parsed.dataVersion || 0)
   };
 }
 
 function reconcileSharedState(localState, remoteState) {
   const local = mergeState(localState);
   const remote = mergeState(remoteState);
-  const session = newerEntity(local.session, remote.session);
-  const patientMap = new Map(remote.patients.map((patient) => [patient.id, patient]));
+  const activeDate = local.session.date || getTodayDate();
+  const directoryMap = new Map(remote.patientDirectory.map((patient) => [patient.id, patient]));
 
-  local.patients.forEach((patient) => {
-    const remotePatient = patientMap.get(patient.id);
-    patientMap.set(patient.id, remotePatient ? newerEntity(patient, remotePatient) : patient);
+  local.patientDirectory.forEach((patient) => {
+    const remotePatient = directoryMap.get(patient.id);
+    directoryMap.set(patient.id, remotePatient ? newerEntity(patient, remotePatient) : patient);
   });
+
+  const dailySessionMap = new Map(Object.entries(remote.dailySessions));
+  Object.entries(local.dailySessions).forEach(([date, daily]) => {
+    const remoteDaily = dailySessionMap.get(date);
+    dailySessionMap.set(date, remoteDaily ? mergeDailySessionEntities(daily, remoteDaily) : daily);
+  });
+  const dailySessions = Object.fromEntries(dailySessionMap);
+  const activeDaily = dailySessions[activeDate] || { note: "", patients: [], completedPurchases: {}, completedDistribution: {} };
 
   const logMap = new Map(remote.historyLogs.map((log) => [log.date, log]));
   local.historyLogs.forEach((log) => {
@@ -1803,20 +2144,46 @@ function reconcileSharedState(localState, remoteState) {
   const reconciled = mergeState({
     ...remote,
     ...local,
-    session,
-    patients: [...patientMap.values()].sort((left, right) =>
+    session: {
+      ...newerEntity(local.session, remote.session),
+      date: activeDate,
+      note: activeDaily.note || ""
+    },
+    patients: activeDaily.patients || [],
+    patientDirectory: [...directoryMap.values()].sort((left, right) =>
       `${left.bed}|${left.name}`.localeCompare(`${right.bed}|${right.name}`, "zh-Hant")
     ),
+    dailySessions,
     activePatientId: local.activePatientId,
-    completedPurchases: { ...remote.completedPurchases, ...local.completedPurchases },
-    completedDistribution: { ...remote.completedDistribution, ...local.completedDistribution },
+    completedPurchases: activeDaily.completedPurchases || {},
+    completedDistribution: activeDaily.completedDistribution || {},
     historyLogs: [...logMap.values()].sort((left, right) => left.date.localeCompare(right.date)),
     balanceTransactions: [...transactionMap.values()],
-    rosterVersion: Math.max(Number(local.rosterVersion || 0), Number(remote.rosterVersion || 0))
+    rosterVersion: Math.max(Number(local.rosterVersion || 0), Number(remote.rosterVersion || 0)),
+    dataVersion: Math.max(Number(local.dataVersion || 0), Number(remote.dataVersion || 0))
   });
-
-  refreshCurrentHistoryLog(reconciled);
+  if (!reconciled.patients.some((patient) => patient.id === reconciled.activePatientId)) {
+    reconciled.activePatientId = reconciled.patients[0]?.id || null;
+  }
   return reconciled;
+}
+
+function mergeDailySessionEntities(localDaily, remoteDaily) {
+  const patientMap = new Map((remoteDaily.patients || []).map((patient) => [patient.id, patient]));
+  (localDaily.patients || []).forEach((patient) => {
+    const remotePatient = patientMap.get(patient.id);
+    patientMap.set(patient.id, remotePatient ? newerEntity(patient, remotePatient) : patient);
+  });
+  const newer = newerEntity(localDaily, remoteDaily);
+  return {
+    ...newer,
+    patients: [...patientMap.values()].sort((left, right) =>
+      normalizeBed(left.bed).localeCompare(normalizeBed(right.bed), "zh-Hant", { numeric: true })
+    ),
+    completedPurchases: { ...(remoteDaily.completedPurchases || {}), ...(localDaily.completedPurchases || {}) },
+    completedDistribution: { ...(remoteDaily.completedDistribution || {}), ...(localDaily.completedDistribution || {}) },
+    updatedAt: newerTimestamp(localDaily.updatedAt, remoteDaily.updatedAt)
+  };
 }
 
 function newerEntity(localEntity, remoteEntity) {
@@ -1965,7 +2332,7 @@ function createSupabaseStorageAdapter(createClient, localAdapter) {
           return reconciledState;
         }
 
-        if (localState.patients.length > 0) {
+        if (localState.patientDirectory.length > 0 || Object.keys(localState.dailySessions).length > 0) {
           await saveRemote(localState);
           return localState;
         }
