@@ -1294,12 +1294,12 @@ function renderPrintSheet() {
     </header>
     <section>
       <h2>採買品項總表</h2>
-      <table><thead><tr><th>序</th><th>品項</th><th>單價</th><th>數量</th><th>小計</th></tr></thead>
+      <table class="print-item-table"><colgroup><col class="col-sequence"><col class="col-item"><col class="col-price"><col class="col-quantity"><col class="col-subtotal"></colgroup><thead><tr><th>序</th><th>品項</th><th>單價</th><th>數量</th><th>小計</th></tr></thead>
       <tbody>${itemRows || '<tr><td colspan="5">本日尚無購物品項</td></tr>'}</tbody></table>
     </section>
     <section>
       <h2>病人分發總表</h2>
-      <table><thead><tr><th>序</th><th>床號</th><th>姓名</th><th>購物內容</th><th>金額</th><th>餘額</th></tr></thead>
+      <table class="print-patient-table"><colgroup><col class="col-sequence"><col class="col-bed"><col class="col-name"><col class="col-items"><col class="col-amount"><col class="col-balance"></colgroup><thead><tr><th>序</th><th>床號</th><th>姓名</th><th>購物內容</th><th>金額</th><th>餘額</th></tr></thead>
       <tbody>${patientRows || '<tr><td colspan="6">本日尚無購物病人</td></tr>'}</tbody></table>
     </section>
     <footer class="print-signatures"><span>採買人員：____________</span><span>覆核人員：____________</span></footer>`;
