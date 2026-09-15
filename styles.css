@@ -125,6 +125,24 @@ button {
   box-shadow: var(--shadow);
 }
 
+.management-panel { margin-bottom: 18px; }
+.management-panel > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; list-style: none; }
+.management-panel > summary::-webkit-details-marker { display: none; }
+.management-panel > summary strong, .management-panel > summary small { display: block; }
+.management-panel > summary small { margin-top: 5px; color: var(--muted); font-weight: 400; }
+.management-toggle { color: var(--accent); font-weight: 700; }
+.management-layout { display: grid; grid-template-columns: minmax(280px, .8fr) minmax(0, 1.2fr); gap: 28px; margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--line); }
+.directory-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+.directory-chip { display: flex; flex-wrap: wrap; align-items: baseline; gap: 7px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,255,255,.58); }
+.directory-chip small { flex-basis: 100%; color: var(--muted); }
+.daily-patient-picker { display: grid; gap: 10px; }
+.date-status { display: grid; gap: 5px; margin: 0 0 12px; padding: 12px 14px; border-radius: 14px; background: rgba(45,106,79,.08); color: var(--muted); }
+.date-status strong { color: var(--ok); }
+.date-status.is-history { background: rgba(191,91,50,.1); }
+.date-status.is-history strong, .date-status.is-editing strong { color: var(--accent); }
+.date-status button { margin-top: 6px; }
+.print-sheet { display: none; }
+
 .hero-card {
   display: grid;
   grid-template-columns: 1.4fr 1fr;
@@ -717,6 +735,7 @@ button:disabled { cursor: not-allowed; opacity: .46; transform: none !important;
 @media (max-width: 1100px) {
   .hero-card,
   .panel-grid,
+  .management-layout,
   .shopping-layout,
   .report-grid,
   .period-report-grid {
@@ -801,46 +820,33 @@ button:disabled { cursor: not-allowed; opacity: .46; transform: none !important;
 }
 
 @media print {
+  @page { size: A4 portrait; margin: 12mm; }
+
   body {
     background: #fff;
+    color: #000;
+    font-family: "Noto Sans TC", sans-serif;
+    font-size: 14pt;
   }
 
-  .background-shape,
-  .app-header,
-  .workflow-nav,
-  .control-panel,
-  .patient-panel,
-  #print-report,
-  #export-csv,
-  #export-weekly-csv,
-  #export-monthly-csv,
-  #export-yearly-csv,
-  #week-reference-date,
-  #month-reference,
-  #year-reference,
-  #category-nav,
-  #subcategory-nav,
-  #product-search {
-    display: none !important;
-  }
-
-  .mobile-cart-bar,
-  .toast { display: none !important; }
+  body > *, .app-shell > * { display: none !important; }
+  .app-shell, .app-shell > .print-sheet { display: block !important; }
 
   .app-shell {
     max-width: none;
     padding: 0;
   }
-
-  .hero-card,
-  .panel {
-    background: #fff;
-    box-shadow: none;
-    border: 0;
-    padding: 0;
-  }
-
-  .hero-copy {
-    margin-bottom: 20px;
-  }
+  .print-sheet { width: 100%; }
+  .print-header { margin-bottom: 8mm; text-align: center; }
+  .print-header h1 { font-size: 18pt; }
+  .print-header p { margin: 3mm 0 0; font-size: 14pt; }
+  .print-sheet section { margin-bottom: 8mm; }
+  .print-sheet h2 { margin: 0 0 3mm; font-size: 16pt; }
+  .print-sheet table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 14pt; }
+  .print-sheet thead { display: table-header-group; }
+  .print-sheet tr { break-inside: avoid; page-break-inside: avoid; }
+  .print-sheet th, .print-sheet td { padding: 2.2mm 2mm; border: 1px solid #000; vertical-align: top; text-align: center; line-height: 1.35; }
+  .print-sheet th { font-weight: 700; }
+  .print-sheet .print-items { width: 42%; text-align: left; }
+  .print-signatures { display: flex; justify-content: space-between; gap: 20mm; margin-top: 10mm; font-size: 14pt; }
 }

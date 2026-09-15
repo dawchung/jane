@@ -74,6 +74,11 @@ globalThis.__appTest = {
   parseRosterText,
   maskPatientName,
   applyInitialRoster,
+  migrateToDailySessions,
+  loadDailySession,
+  addPatientToCurrentDate,
+  saveCurrentDailySession,
+  renderPrintSheet,
   addBalanceEntry,
   setState(value) { state = mergeState(value); normalizeState(); },
   getState() { return structuredClone(state); }
@@ -86,21 +91,34 @@ const timestamp = "2026-09-14T12:00:00.000Z";
 const common = {
   session: { date: "2026-09-14", budgetLimit: 100, monthlyAlertThreshold: 1000, updatedAt: timestamp },
   patients: [],
+  patientDirectory: [],
+  dailySessions: {},
   historyLogs: [],
-  balanceTransactions: []
+  balanceTransactions: [],
+  dataVersion: 2,
+  rosterVersion: 1
 };
 
 const merged = test.reconcileSharedState(
-  { ...common, activePatientId: "a", patients: [{ id: "a", bed: "P1-01", name: "甲", balance: 1000, shoppingLimit: 100, cart: [], updatedAt: timestamp }] },
-  { ...common, patients: [{ id: "b", bed: "P1-02", name: "乙", balance: 1000, shoppingLimit: 200, cart: [], updatedAt: timestamp }] }
+  { ...common,
+    activePatientId: "a",
+    patientDirectory: [{ id: "a", bed: "P1-01", name: "甲", balance: 1000, shoppingLimit: 100, updatedAt: timestamp }],
+    dailySessions: { "2026-09-14": { date: "2026-09-14", patients: [{ id: "a", bed: "P1-01", name: "甲", balance: 1000, shoppingLimit: 100, cart: [], updatedAt: timestamp }], updatedAt: timestamp } }
+  },
+  { ...common,
+    patientDirectory: [{ id: "b", bed: "P1-02", name: "乙", balance: 1000, shoppingLimit: 200, updatedAt: timestamp }],
+    dailySessions: { "2026-09-14": { date: "2026-09-14", patients: [{ id: "b", bed: "P1-02", name: "乙", balance: 1000, shoppingLimit: 200, cart: [], updatedAt: timestamp }], updatedAt: timestamp } }
+  }
 );
 assert.equal(merged.patients.length, 2, "兩台裝置新增的不同病人應合併");
+assert.equal(merged.patientDirectory.length, 2, "兩台裝置的病人基本名單應合併");
 assert.equal(test.getPatientLimit(merged.patients.find((patient) => patient.id === "a")), 100);
 assert.equal(test.getPatientLimit(merged.patients.find((patient) => patient.id === "b")), 200);
 
 test.setState({
   ...common,
   activePatientId: "b",
+  patientDirectory: [{ id: "b", bed: "P1-02", name: "乙", balance: 1000, shoppingLimit: 200, updatedAt: timestamp }],
   patients: [{
     id: "b", bed: "P1-02", name: "乙", balance: 1000, shoppingLimit: 200,
     cart: [{ name: "100元電話卡", price: 100, quantity: 1 }], updatedAt: timestamp
@@ -131,6 +149,7 @@ const fakeForm = {
 test.addBalanceEntry(fakeForm);
 current = test.getState();
 assert.equal(current.patients[0].balance, 1500, "零用金入帳應增加餘額");
+assert.equal(current.patientDirectory[0].balance, 1500, "零用金餘額應延續到病人基本資料");
 assert.equal(current.balanceTransactions.length, 1, "零用金入帳應保留交易紀錄");
 
 assert.equal(context.window.PRODUCTS.some((group) => group.category === "電話卡"), true);
@@ -152,14 +171,29 @@ test.setState({
     id: "existing-p1-10", bed: "P1-10", name: "黃X凱", balance: 5284, shoppingLimit: 100,
     cart: [{ name: "100元電話卡", price: 100, quantity: 1 }], updatedAt: timestamp
   }],
-  rosterVersion: 0
+  rosterVersion: 0,
+  dataVersion: 0
 });
+assert.equal(test.migrateToDailySessions(), true, "舊資料應拆分為病人基本名單與每日資料");
 assert.equal(test.applyInitialRoster(), true, "舊資料應執行一次名單移轉");
 current = test.getState();
-const migratedPatient = current.patients.find((patient) => patient.bed === "P1-10");
-assert.equal(current.patients.length, 19, "應預先建立19位匿名病人");
+const migratedPatient = current.patientDirectory.find((patient) => patient.bed === "P1-10");
+assert.equal(current.patientDirectory.length, 19, "應預先建立19位匿名病人基本名單");
 assert.equal(migratedPatient.name, "黃X凱");
 assert.equal(migratedPatient.balance, 5284, "既有零用金應保留");
-assert.equal(migratedPatient.cart.length, 1, "既有購物清單應保留");
 assert.equal(migratedPatient.shoppingLimit, 200, "黃X凱的個別上限應為200元");
+assert.equal(current.dailySessions["2026-09-14"].patients[0].cart.length, 1, "既有購物清單應保留在原日期");
+
+test.setState({
+  ...common,
+  session: { ...common.session, date: "2026-09-15" },
+  patientDirectory: [{ id: "b", bed: "P1-02", name: "乙", balance: 1500, shoppingLimit: 200, updatedAt: timestamp }]
+});
+test.loadDailySession("2026-09-15");
+test.addPatientToCurrentDate("b");
+current = test.getState();
+assert.equal(current.patients[0].balance, 1500, "新日期應延續目前零用金");
+assert.equal(current.patients[0].shoppingLimit, 200, "新日期應以上次購物上限為預設值");
+test.renderPrintSheet();
+assert.match(getElement("#print-sheet").innerHTML, /每日購物總表/, "Step 4 應產生每日總表列印內容");
 console.log("smoke test passed");
