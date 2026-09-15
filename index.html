@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./styles.css?v=20260913c" />
+  <link rel="stylesheet" href="./styles.css?v=20260915a" />
 </head>
 <body>
   <div class="background-shape background-shape-left"></div>
@@ -24,7 +24,7 @@
       </div>
       <div class="header-context">
         <span id="header-date">本次購物</span>
-        <a class="header-help" href="#setup">設定與新增病人</a>
+        <a class="header-help" href="#patient-management">病人名單管理</a>
       </div>
     </header>
 
@@ -36,11 +36,59 @@
       <button type="button" id="sync-refresh" class="secondary-button">重新整理雲端資料</button>
     </section>
 
+    <details id="patient-management" class="panel management-panel">
+      <summary>
+        <span><strong>病人名單管理</strong><small>新增病人、零用金與預設購物上限</small></span>
+        <span class="management-toggle">展開管理</span>
+      </summary>
+      <div class="management-layout">
+        <div>
+          <h2>新增病人</h2>
+          <form id="patient-form" class="stack-form">
+            <label>
+              <span>床號</span>
+              <input type="text" id="patient-bed" maxlength="10" placeholder="例如：P1-26" required />
+            </label>
+            <label>
+              <span>病人姓名</span>
+              <input type="text" id="patient-name" maxlength="30" placeholder="例如：王小明（系統顯示王X明）" required />
+            </label>
+            <label>
+              <span>目前零用金</span>
+              <div class="input-prefix">
+                <strong>NT$</strong>
+                <input type="number" id="patient-balance" min="0" step="1" value="0" required />
+              </div>
+            </label>
+            <label>
+              <span>預設購物上限</span>
+              <div class="input-prefix">
+                <strong>NT$</strong>
+                <input type="number" id="patient-shopping-limit" min="0" step="1" value="100" required />
+              </div>
+            </label>
+            <button type="submit" class="primary-button">新增至病人名單</button>
+          </form>
+
+          <details class="batch-import-panel">
+            <summary>批次匯入病人名單</summary>
+            <p>可貼上 Excel、CSV、Tab 分隔或 Markdown 表格。已有床號會保留未填寫的零用金；空白姓名不匯入。</p>
+            <textarea id="roster-import-text" rows="8" placeholder="例如：&#10;精一,P1-04,王小明,,100&#10;精一,P1-05,李小華,500,200"></textarea>
+            <button type="button" id="import-roster" class="secondary-button">匯入名單</button>
+          </details>
+        </div>
+        <div>
+          <h2>目前病人名單</h2>
+          <div id="directory-list" class="directory-list"></div>
+        </div>
+      </div>
+    </details>
+
     <nav class="workflow-nav" aria-label="操作流程">
-      <a href="#setup"><span>1</span>建立名單</a>
-      <a href="#shopping"><span>2</span>選擇商品</a>
-      <a href="#cart-panel"><span>3</span>確認清單</a>
-      <a href="#reports"><span>4</span>採買分發</a>
+      <a href="#setup"><span>1</span>選擇日期</a>
+      <a href="#daily-patients"><span>2</span>加入病人</a>
+      <a href="#shopping"><span>3</span>選擇商品</a>
+      <a href="#reports"><span>4</span>列印分發</a>
     </nav>
 
     <section class="hero-card">
@@ -48,7 +96,7 @@
         <p class="eyebrow">本次購物一覽</p>
         <h1>今天要幫誰買什麼？</h1>
         <p class="hero-copy">
-          先選病人，再點選商品。系統會隨時計算金額並提醒可用餘額。
+          先選日期與購物病人，再點選商品。系統會隨時計算金額並提醒可用餘額。
         </p>
       </div>
       <div class="hero-stats">
@@ -72,7 +120,7 @@
         <div class="panel-heading">
           <div>
             <p class="panel-kicker">Step 1</p>
-            <h2>設定本次購物</h2>
+            <h2>選擇購物日期</h2>
           </div>
         </div>
 
@@ -82,57 +130,22 @@
             <input type="date" id="shopping-date" required />
           </label>
           <label>
-            <span>預設單人購物上限</span>
-            <div class="input-prefix">
-              <strong>NT$</strong>
-              <input type="number" id="budget-limit" min="0" step="1" value="100" required />
-            </div>
-          </label>
-          <label>
             <span>備註</span>
             <textarea id="session-note" rows="2" placeholder="例如：周一固定購物、家屬已加值零用金"></textarea>
           </label>
         </form>
 
-        <div id="patients" class="panel-heading sub-heading">
+        <div id="daily-patients" class="panel-heading sub-heading">
           <div>
             <p class="panel-kicker">Step 2</p>
-            <h2>新增病人</h2>
+            <h2>加入本次購物病人</h2>
           </div>
         </div>
-
-        <form id="patient-form" class="stack-form">
-          <label>
-            <span>床號</span>
-            <input type="text" id="patient-bed" maxlength="10" placeholder="例如：15" required />
-          </label>
-          <label>
-            <span>病人姓名</span>
-            <input type="text" id="patient-name" maxlength="30" placeholder="例如：王OO" required />
-          </label>
-          <label>
-            <span>目前零用金</span>
-            <div class="input-prefix">
-              <strong>NT$</strong>
-              <input type="number" id="patient-balance" min="0" step="1" value="100" required />
-            </div>
-          </label>
-          <label>
-            <span>個別購物上限</span>
-            <div class="input-prefix">
-              <strong>NT$</strong>
-              <input type="number" id="patient-shopping-limit" min="0" step="1" value="100" required />
-            </div>
-          </label>
-          <button type="submit" class="primary-button">加入今日購物名單</button>
-        </form>
-
-        <details class="batch-import-panel">
-          <summary>批次匯入病人名單</summary>
-          <p>可貼上 Excel、CSV、Tab 分隔或 Markdown 表格。已有床號會保留零用金與購物清單；空白姓名不匯入。</p>
-          <textarea id="roster-import-text" rows="8" placeholder="例如：&#10;精一,P1-04,王OO,,100&#10;精一,P1-05,李OO,500,200"></textarea>
-          <button type="button" id="import-roster" class="secondary-button">匯入名單</button>
-        </details>
+        <p id="date-status" class="date-status">選擇日期後，系統會載入該日資料或建立新的購物紀錄。</p>
+        <div class="daily-patient-picker">
+          <select id="daily-patient-select" aria-label="選擇要加入本次購物的病人"></select>
+          <button type="button" id="add-daily-patient" class="primary-button">加入本次購物</button>
+        </div>
       </section>
 
       <section id="shopping" class="panel patient-panel">
@@ -145,7 +158,7 @@
         </div>
 
         <div id="patient-overview" class="patient-overview empty-state">
-          請先新增病人。
+          請先從 Step 2 加入本次購物病人。
         </div>
         <div id="patient-quick-nav" class="patient-quick-nav" aria-label="快速切換病人"></div>
 
@@ -257,6 +270,8 @@
         </section>
       </div>
     </section>
+
+    <section id="print-sheet" class="print-sheet" aria-hidden="true"></section>
   </main>
 
   <a id="mobile-cart-bar" class="mobile-cart-bar" href="#cart-panel">
@@ -277,6 +292,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./product-images.js?v=20260913b"></script>
   <script src="./catalog.js?v=20260914a"></script>
-  <script src="./app.js?v=20260914c"></script>
+  <script src="./app.js?v=20260915a"></script>
 </body>
 </html>
