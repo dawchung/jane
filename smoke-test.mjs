@@ -196,4 +196,6 @@ assert.equal(current.patients[0].balance, 1500, "新日期應延續目前零用�
 assert.equal(current.patients[0].shoppingLimit, 200, "新日期應以上次購物上限為預設值");
 test.renderPrintSheet();
 assert.match(getElement("#print-sheet").innerHTML, /每日購物總表/, "Step 4 應產生每日總表列印內容");
+assert.match(getElement("#print-sheet").innerHTML, /print-patient-table/, "病人分發總表應使用獨立欄寬設定");
+assert.match(getElement("#print-sheet").innerHTML, /col-items/, "購物內容欄應可獨立加寬");
 console.log("smoke test passed");
