@@ -2548,9 +2548,19 @@ function createSupabaseStorageAdapter(createClient, localAdapter) {
     mode: "cloud",
     async loadState() {
       const localState = loadLocalState();
+      const restoreLegacyData = sessionStorage.getItem("psych-shopping-legacy-restore-pending") === "1";
+      const localHasData = localState.patientDirectory.length > 0
+        || Object.keys(localState.dailySessions).length > 0
+        || localState.historyLogs.length > 0
+        || localState.balanceTransactions.length > 0;
 
       try {
         const remoteRow = await fetchRow();
+        if (restoreLegacyData && localHasData) {
+          const restoredState = await saveRemote(localState);
+          sessionStorage.removeItem("psych-shopping-legacy-restore-pending");
+          return restoredState;
+        }
         if (remoteRow?.payload) {
           lastRemoteUpdatedAt = remoteRow.updated_at || "";
           const reconciledState = reconcileSharedState(localState, remoteRow.payload);
