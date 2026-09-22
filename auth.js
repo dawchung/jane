@@ -1,7 +1,6 @@
 (() => {
   const config = window.APP_CONFIG || {};
   const authConfig = config.auth || {};
-  const syncConfig = config.sync || {};
   const enabled = Boolean(authConfig.enabled);
   const loginScreen = document.querySelector("#login-screen");
   const protectedApp = document.querySelector("#protected-app");
@@ -13,10 +12,8 @@
   const togglePassword = document.querySelector("#toggle-password");
   const currentUser = document.querySelector("#current-user");
   const logoutButton = document.querySelector("#logout-button");
-  const createClient = window.supabase?.createClient;
-  const client = createClient && syncConfig.supabaseUrl && syncConfig.supabaseAnonKey
-    ? createClient(syncConfig.supabaseUrl, syncConfig.supabaseAnonKey)
-    : null;
+  const SESSION_KEY = "psych-shopping-local-auth";
+  const AUDIT_KEY = "psych-shopping-local-audit";
   let session = null;
   let profile = null;
   let resolveReady;
@@ -26,8 +23,10 @@
     return String(value || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
   }
 
-  function cardToEmail(cardNumber) {
-    return `${normalizeCard(cardNumber)}@${syncConfig.wardId || "ward"}.local`;
+  async function sha256(value) {
+    const bytes = new TextEncoder().encode(value);
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
   }
 
   function setAuthenticatedView() {
@@ -35,59 +34,53 @@
     protectedApp.hidden = false;
     currentUser.hidden = false;
     logoutButton.hidden = false;
-    currentUser.textContent = `${profile?.display_name || "工作人員"}｜${profile?.role === "admin" ? "管理者" : "工作人員"}`;
+    currentUser.textContent = `${profile.display_name}｜${profile.role === "admin" ? "管理者" : "工作人員"}`;
   }
 
   function setLoginView(message = "") {
     protectedApp.hidden = true;
     loginScreen.hidden = false;
+    currentUser.hidden = true;
+    logoutButton.hidden = true;
     loginError.textContent = message;
     cardInput.focus();
   }
 
-  async function loadProfile(nextSession) {
-    const { data, error } = await client.from("staff_profiles")
-      .select("user_id, card_number, display_name, role, ward_id, active")
-      .eq("user_id", nextSession.user.id)
-      .maybeSingle();
-    if (error || !data?.active || data.ward_id !== syncConfig.wardId) {
-      await client.auth.signOut();
-      throw new Error("此帳號尚未啟用或不屬於本病房，請聯絡管理者。");
-    }
-    return data;
-  }
-
-  async function acceptSession(nextSession) {
-    profile = await loadProfile(nextSession);
-    session = nextSession;
-    setAuthenticatedView();
-    resolveReady({ session, profile });
-    await logAction("login");
-  }
-
   async function logAction(action, patientId = null, details = {}) {
-    if (!enabled || !client || !session || !profile) return;
-    try {
-      await client.from("audit_logs").insert({
-        ward_id: profile.ward_id,
-        user_id: session.user.id,
-        action,
-        patient_id: patientId,
-        details
-      });
-    } catch (error) {
-      console.warn("無法寫入操作紀錄", error);
-    }
+    if (!enabled || !profile) return;
+    const records = JSON.parse(localStorage.getItem(AUDIT_KEY) || "[]");
+    records.push({
+      at: new Date().toISOString(),
+      card_number: profile.card_number,
+      display_name: profile.display_name,
+      role: profile.role,
+      action,
+      patient_id: patientId,
+      details
+    });
+    localStorage.setItem(AUDIT_KEY, JSON.stringify(records.slice(-1000)));
   }
 
   async function logout(message = "您已安全登出。") {
     if (session) await logAction("logout");
-    if (client) await client.auth.signOut();
     session = null;
     profile = null;
-    sessionStorage.removeItem("psych-shopping-session");
-    localStorage.removeItem("psych-shopping-session");
+    sessionStorage.removeItem(SESSION_KEY);
     setLoginView(message);
+  }
+
+  function acceptUser(user) {
+    profile = {
+      card_number: user.cardNumber,
+      display_name: user.displayName,
+      role: user.role === "admin" ? "admin" : "staff",
+      ward_id: config.sync?.wardId || "psych-ward-a",
+      active: true
+    };
+    session = { user: { id: `local:${user.cardNumber}` }, created_at: new Date().toISOString() };
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ cardNumber: user.cardNumber }));
+    setAuthenticatedView();
+    return logAction("login");
   }
 
   function startIdleTimer() {
@@ -105,22 +98,22 @@
   loginForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const cardNumber = normalizeCard(cardInput.value);
-    if (!cardNumber || passwordInput.value.length < 8) {
-      loginError.textContent = "請輸入正確的卡號及至少 8 碼密碼。";
-      return;
-    }
+    const users = Array.isArray(authConfig.users) ? authConfig.users : [];
     loginSubmit.disabled = true;
     loginError.textContent = "正在驗證身分…";
-    const { data, error } = await client.auth.signInWithPassword({
-      email: cardToEmail(cardNumber),
-      password: passwordInput.value
-    });
-    passwordInput.value = "";
     try {
-      if (error || !data.session) throw new Error("卡號或密碼錯誤。");
-      await acceptSession(data.session);
-    } catch (loginFailure) {
-      loginError.textContent = loginFailure.message || "登入失敗，請稍後再試。";
+      const passwordHash = await sha256(passwordInput.value);
+      const user = users.find((candidate) =>
+        normalizeCard(candidate.cardNumber) === cardNumber &&
+        candidate.active !== false &&
+        candidate.passwordHash === passwordHash);
+      if (!user) throw new Error("卡號或密碼錯誤。");
+      await acceptUser(user);
+      cardInput.value = "";
+      passwordInput.value = "";
+    } catch (error) {
+      passwordInput.value = "";
+      loginError.textContent = error.message || "登入失敗，請稍後再試。";
     } finally {
       loginSubmit.disabled = false;
     }
@@ -135,7 +128,7 @@
 
   window.AUTH_GATE = {
     enabled,
-    client,
+    client: null,
     ready,
     getSession: () => session,
     getProfile: () => profile,
@@ -150,19 +143,16 @@
     resolveReady({ session: null, profile: null });
     return;
   }
-  localStorage.removeItem("psych-shopping-session");
-  if (!client) {
-    setLoginView("登入服務尚未完成設定，請聯絡管理者。");
-    return;
-  }
+
   setLoginView();
-  client.auth.getSession().then(async ({ data }) => {
-    if (!data.session) return;
-    try {
-      await acceptSession(data.session);
-    } catch (error) {
-      setLoginView(error.message);
-    }
-  });
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null");
+    const user = authConfig.users?.find((candidate) =>
+      candidate.active !== false && normalizeCard(candidate.cardNumber) === normalizeCard(saved?.cardNumber));
+    if (user) acceptUser(user).then(() => resolveReady({ session, profile }));
+    else resolveReady({ session: null, profile: null });
+  } catch {
+    resolveReady({ session: null, profile: null });
+  }
   startIdleTimer();
 })();
