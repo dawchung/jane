@@ -1345,7 +1345,7 @@ function renderPrintSheet() {
     const items = patient.cart.length
       ? patient.cart.map((entry) => `${entry.name}×${entry.quantity}`).join("、")
       : "尚未選購";
-    return `<tr><td>${index + 1}</td><td>${patient.bed}</td><td>${patient.name}</td><td class="print-items">${items}</td><td>${total}</td><td>${patient.balance - total}</td></tr>`;
+    return `<tr><td>${index + 1}</td><td>${patient.bed}</td><td>${patient.name}</td><td class="print-items">${items}</td><td>${total}</td><td>${patient.balance - total}</td><td class="signature-cell"></td><td class="signature-cell"></td></tr>`;
   }).join("");
   const totalPieces = state.patients.reduce((sum, patient) =>
     sum + patient.cart.reduce((patientSum, entry) => patientSum + Number(entry.quantity || 0), 0), 0);
@@ -1364,8 +1364,8 @@ function renderPrintSheet() {
     </section>
     <section>
       <h2>病人分發總表</h2>
-      <table class="print-patient-table"><colgroup><col class="col-sequence"><col class="col-bed"><col class="col-name"><col class="col-items"><col class="col-amount"><col class="col-balance"></colgroup><thead><tr><th>序</th><th>床號</th><th>姓名</th><th>購物內容</th><th>金額</th><th>餘額</th></tr></thead>
-      <tbody>${patientRows || '<tr><td colspan="6">本日尚無購物病人</td></tr>'}</tbody></table>
+      <table class="print-patient-table"><colgroup><col class="col-sequence"><col class="col-bed"><col class="col-name"><col class="col-items"><col class="col-amount"><col class="col-balance"><col class="col-patient-sign"><col class="col-staff-sign"></colgroup><thead><tr><th>序</th><th>床號</th><th>姓名</th><th>購物內容</th><th>金額</th><th>餘額</th><th>病人／家屬簽章</th><th>工作人員簽章</th></tr></thead>
+      <tbody>${patientRows || '<tr><td colspan="8">本日尚無購物病人</td></tr>'}</tbody></table>
     </section>
     <footer class="print-signatures"><span>採買人員：____________</span><span>覆核人員：____________</span></footer>`;
 }

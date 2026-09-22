@@ -877,12 +877,17 @@ button:disabled { cursor: not-allowed; opacity: .46; transform: none !important;
   .print-sheet .print-item-table .col-price { width: 16%; }
   .print-sheet .print-item-table .col-quantity { width: 14%; }
   .print-sheet .print-item-table .col-subtotal { width: 18%; }
-  .print-sheet .print-patient-table .col-sequence { width: 5%; }
-  .print-sheet .print-patient-table .col-bed { width: 12%; }
-  .print-sheet .print-patient-table .col-name { width: 13%; }
-  .print-sheet .print-patient-table .col-items { width: 46%; }
-  .print-sheet .print-patient-table .col-amount { width: 12%; }
-  .print-sheet .print-patient-table .col-balance { width: 12%; }
+  .print-sheet .print-patient-table { font-size: 9pt; }
+  .print-sheet .print-patient-table th, .print-sheet .print-patient-table td { padding: 1.5mm 1mm; line-height: 1.25; }
+  .print-sheet .print-patient-table .col-sequence { width: 4%; }
+  .print-sheet .print-patient-table .col-bed { width: 9%; }
+  .print-sheet .print-patient-table .col-name { width: 10%; }
+  .print-sheet .print-patient-table .col-items { width: 35%; }
+  .print-sheet .print-patient-table .col-amount { width: 8%; }
+  .print-sheet .print-patient-table .col-balance { width: 8%; }
+  .print-sheet .print-patient-table .col-patient-sign,
+  .print-sheet .print-patient-table .col-staff-sign { width: 13%; }
+  .print-sheet .print-patient-table .signature-cell { height: 12mm; }
   .print-sheet .print-patient-table th:nth-child(1),
   .print-sheet .print-patient-table td:nth-child(1) { padding-left: 1mm; padding-right: 1mm; }
   .print-sheet .print-patient-table th:nth-child(2),

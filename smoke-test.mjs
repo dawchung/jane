@@ -237,6 +237,8 @@ test.renderPrintSheet();
 assert.match(getElement("#print-sheet").innerHTML, /每日購物總表/, "Step 4 應產生每日總表列印內容");
 assert.match(getElement("#print-sheet").innerHTML, /print-patient-table/, "病人分發總表應使用獨立欄寬設定");
 assert.match(getElement("#print-sheet").innerHTML, /col-items/, "購物內容欄應可獨立加寬");
+assert.match(getElement("#print-sheet").innerHTML, /病人／家屬簽章/, "病人分發表應包含病人或家屬簽章欄");
+assert.match(getElement("#print-sheet").innerHTML, /工作人員簽章/, "病人分發表應包含工作人員簽章欄");
 
 test.setState({
   ...common,
