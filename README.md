@@ -61,6 +61,14 @@
 - 目前已預留 Supabase 同步模式
 - `supabase-setup.sql` 提供建立共享資料表的 SQL
 
+## 工作人員登入管制
+
+- 支援以員工卡號及至少 8 碼密碼登入，卡號會轉為內部 Auth 帳號識別
+- 使用 Supabase Authentication 保存密碼雜湊，前端及資料表都不保存密碼明碼
+- 角色分為管理者與一般工作人員；只有管理者能刪除病人
+- 閒置 30 分鐘自動登出，並保存登入、入帳、確認購物與病人資料異動紀錄
+- `config.js` 的 `auth.enabled` 需在帳號及 RLS 安全規則完成後才改為 `true`
+
 ## 啟用 Supabase 共享同步
 
 1. 在 Supabase 建立一個專案

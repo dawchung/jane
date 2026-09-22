@@ -121,28 +121,9 @@ const syncConfig = {
 const defaultMonthlyAlertThreshold = 1000;
 const limitExemptCategories = new Set(["日用品", "電話卡", "其他"]);
 const dataVersion = 2;
-const rosterVersion = 1;
-const initialRoster = [
-  { bed: "P1-04", name: "高X源", shoppingLimit: 100 },
-  { bed: "P1-05", name: "熊X智", shoppingLimit: 100 },
-  { bed: "P1-06", name: "李X吉", shoppingLimit: 100 },
-  { bed: "P1-07", name: "宋X偉", shoppingLimit: 100 },
-  { bed: "P1-08", name: "許X府", shoppingLimit: 100 },
-  { bed: "P1-09", name: "林X禾", shoppingLimit: 100 },
-  { bed: "P1-10", name: "黃X凱", shoppingLimit: 200 },
-  { bed: "P1-11", name: "黃X鑫", shoppingLimit: 100 },
-  { bed: "P1-12", name: "張X慶", shoppingLimit: 100 },
-  { bed: "P1-13", name: "葉X彰", shoppingLimit: 100 },
-  { bed: "P1-14", name: "林X亮", shoppingLimit: 100 },
-  { bed: "P1-15", name: "蔡X齊", shoppingLimit: 100 },
-  { bed: "P1-18", name: "洪X琳", shoppingLimit: 100 },
-  { bed: "P1-19", name: "楊X隆", shoppingLimit: 100 },
-  { bed: "P1-20", name: "盧X正", shoppingLimit: 100 },
-  { bed: "P1-21", name: "魏X暉", shoppingLimit: 100 },
-  { bed: "P1-22", name: "蔡X欣", shoppingLimit: 100 },
-  { bed: "P1-24", name: "陳X圳", shoppingLimit: 100 },
-  { bed: "P1-25", name: "林X峻", shoppingLimit: 100 }
-];
+const rosterVersion = 2;
+// 病人名單只從登入後的雲端資料載入，不再寫入公開網站原始碼。
+const initialRoster = [];
 const defaultState = {
   session: {
     date: new Date().toISOString().slice(0, 10),
@@ -240,6 +221,7 @@ const elements = {
 initialize();
 
 async function initialize() {
+  await window.AUTH_GATE?.ready;
   storageAdapter = await buildStorageAdapter();
   state = await storageAdapter.loadState();
   normalizeState();
@@ -450,6 +432,7 @@ function bindPatientForm() {
     persist();
     render();
     showToast(`${patient.bed}床 ${patient.name} 已加入病人名單。`);
+    recordAudit("patient_created", patient.id, { bed: patient.bed });
   });
 }
 
@@ -489,6 +472,7 @@ function bindDirectoryInteraction() {
     persist();
     render();
     showToast(`${bed}床 ${name} 的資料已更新。`);
+    recordAudit("patient_updated", patient.id, { bed });
   });
 
   elements.directoryList.addEventListener("click", (event) => {
@@ -496,6 +480,10 @@ function bindDirectoryInteraction() {
     if (!button) return;
     const patient = getDirectoryPatient(button.dataset.deletePatientId);
     if (!patient) return;
+    if (!window.AUTH_GATE?.isAdmin()) {
+      showToast("只有管理者可以刪除病人。", "warning");
+      return;
+    }
     if (!window.confirm(`確定要從病人名單刪除 ${patient.bed}床 ${patient.name}？\n\n本日尚未完成的購物資料會一併移除，過去的購物與入帳紀錄仍會保留。`)) return;
 
     const now = new Date().toISOString();
@@ -511,6 +499,7 @@ function bindDirectoryInteraction() {
     persist();
     render();
     showToast(`${patient.bed}床 ${patient.name} 已從病人名單刪除。`);
+    recordAudit("patient_deleted", patient.id, { bed: patient.bed });
   });
 }
 
@@ -591,6 +580,7 @@ function addBalanceEntry(form) {
   persist();
   render();
   showToast(`${patient.bed}床 ${patient.name} 已入帳 NT$${Math.floor(amount)}。`);
+  recordAudit("balance_deposit", patient.id, { amount: Math.floor(amount), date, note });
 }
 
 function bindToolbar() {
@@ -828,6 +818,7 @@ function bindCartInteraction() {
     patient.confirmedAt = new Date().toISOString();
     markPatientUpdated(patient);
     showToast(`已確認 ${patient.bed}床 ${patient.name}，共 NT$${total}，零用金餘額 NT$${patient.balance - total}。`);
+    recordAudit("order_confirmed", patient.id, { date: state.session.date, total });
     syncCurrentSessionToHistory();
     persist();
     document.querySelector("#reports")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -911,7 +902,7 @@ function renderDirectoryList() {
         <label><span>預設購物上限</span><input name="shoppingLimit" type="number" min="0" step="1" value="${patient.shoppingLimit ?? 100}" required /></label>
         <div class="directory-card-actions">
           <button type="submit" class="primary-button">儲存修改</button>
-          <button type="button" class="secondary-button danger-button" data-delete-patient-id="${escapeHtml(patient.id)}">刪除病人</button>
+          ${window.AUTH_GATE?.isAdmin() ? `<button type="button" class="secondary-button danger-button" data-delete-patient-id="${escapeHtml(patient.id)}">刪除病人</button>` : ""}
         </div>
       </form>
     </details>`).join("");
@@ -936,7 +927,7 @@ function renderDateStatus() {
     elements.dateStatus.innerHTML = `<strong>已叫出 ${state.session.date} 的過去輸入資料（唯讀）</strong><span>如需更正，請先明確開啟編輯。</span><button id="edit-history-date" type="button" class="secondary-button">編輯此日資料</button>`;
   } else if (isPast && historyEditing) {
     elements.dateStatus.className = "date-status is-editing";
-    elements.dateStatus.innerHTML = `<strong>正在編輯 ${state.session.date} 的過去資料</strong><span>修改會同步更新日／週／月／年報。</span>`;
+    elements.dateStatus.innerHTML = `<strong>正在編輯 ${state.session.date} 的過去資料</strong><span>修改會同步更新每日總表與出院彙整表。</span>`;
   } else {
     elements.dateStatus.className = "date-status";
     elements.dateStatus.innerHTML = `<strong>${saved ? "已載入此日購物資料" : "此日期尚無資料"}</strong><span>${saved ? `目前有 ${state.patients.length} 位購物病人。` : "請從下方選單加入本次購物病人。"}</span>`;
@@ -1239,6 +1230,10 @@ function showToast(message, tone = "success") {
   toastTimerId = window.setTimeout(() => {
     elements.toast.className = "toast";
   }, 3200);
+}
+
+function recordAudit(action, patientId = null, details = {}) {
+  window.AUTH_GATE?.logAction(action, patientId, details);
 }
 
 function renderReports() {
@@ -2171,7 +2166,7 @@ function toMonthValue(dateText) {
 
 function loadLocalState() {
   try {
-    const saved = localStorage.getItem(storageKey);
+    const saved = getClientStorage().getItem(storageKey);
     if (!saved) {
       return structuredClone(defaultState);
     }
@@ -2215,7 +2210,11 @@ function persist() {
 }
 
 function backupLocalState(nextState) {
-  localStorage.setItem(storageKey, JSON.stringify(mergeState(nextState)));
+  getClientStorage().setItem(storageKey, JSON.stringify(mergeState(nextState)));
+}
+
+function getClientStorage() {
+  return window.AUTH_GATE?.enabled ? sessionStorage : localStorage;
 }
 
 function mergeState(nextState) {
@@ -2459,7 +2458,8 @@ async function buildStorageAdapter() {
     return createLocalStorageAdapter("雲端同步未設定，已退回本機模式。");
   }
 
-  const createClient = window.supabase?.createClient;
+  const sharedClient = window.AUTH_GATE?.client;
+  const createClient = sharedClient ? () => sharedClient : window.supabase?.createClient;
   if (typeof createClient !== "function") {
     return createLocalStorageAdapter("無法載入雲端同步元件，已退回本機模式。", "is-warning");
   }

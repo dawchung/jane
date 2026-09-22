@@ -7,13 +7,25 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./styles.css?v=20260922b" />
+  <link rel="stylesheet" href="./styles.css?v=20260922c" />
 </head>
 <body>
   <div class="background-shape background-shape-left"></div>
   <div class="background-shape background-shape-right"></div>
 
-  <main class="app-shell">
+  <section id="login-screen" class="login-screen" hidden>
+    <form id="login-form" class="login-card">
+      <span class="brand-mark" aria-hidden="true">購</span>
+      <div><p class="eyebrow">工作人員登入</p><h1>精神科購物管理</h1><p>請使用員工卡號及密碼登入。</p></div>
+      <label><span>員工卡號</span><input id="login-card-number" type="text" inputmode="numeric" autocomplete="username" maxlength="30" required /></label>
+      <label><span>密碼</span><span class="password-field"><input id="login-password" type="password" autocomplete="current-password" minlength="8" required /><button id="toggle-password" type="button">顯示</button></span></label>
+      <p id="login-error" class="login-error" role="alert"></p>
+      <button id="login-submit" type="submit" class="primary-button">登入系統</button>
+      <small>忘記密碼請聯絡系統管理者。</small>
+    </form>
+  </section>
+
+  <main id="protected-app" class="app-shell">
     <header class="app-header">
       <div class="brand-block">
         <span class="brand-mark" aria-hidden="true">購</span>
@@ -25,6 +37,8 @@
       <div class="header-context">
         <span id="header-date">本次購物</span>
         <a class="header-help" href="#patient-management">病人名單管理</a>
+        <span id="current-user" class="current-user" hidden></span>
+        <button id="logout-button" type="button" class="header-help logout-button" hidden>登出</button>
       </div>
     </header>
 
@@ -260,8 +274,9 @@
 
   <script src="./config.js?v=20260914a"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./auth.js?v=20260922a"></script>
   <script src="./product-images.js?v=20260913b"></script>
   <script src="./catalog.js?v=20260914a"></script>
-  <script src="./app.js?v=20260922d"></script>
+  <script src="./app.js?v=20260922e"></script>
 </body>
 </html>

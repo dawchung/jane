@@ -1,4 +1,8 @@
 window.APP_CONFIG = {
+  auth: {
+    enabled: false,
+    idleTimeoutMinutes: 30
+  },
   sync: {
     provider: "supabase",
     supabaseUrl: "https://zyswxsiyrlesokpfyfdd.supabase.co",
