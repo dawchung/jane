@@ -224,51 +224,21 @@
         </section>
       </div>
 
-      <div class="period-report-grid">
-        <section class="period-report-card">
-          <div class="period-report-header">
-            <h3>週報匯出</h3>
-            <button type="button" id="export-weekly-csv" class="secondary-button">匯出週報 CSV</button>
+      <section class="discharge-report-card">
+        <div class="period-report-header">
+          <div>
+            <h3>出院｜住院期間購物與餘額彙整表</h3>
+            <p class="summary-meta">選擇病人及住院期間，彙整每日購買品項、支出與剩餘零用金。</p>
           </div>
-          <label>
-            <span>週報參考日期</span>
-            <input type="date" id="week-reference-date" />
-          </label>
-          <div id="weekly-summary" class="summary-list empty-state">尚無可用週報資料。</div>
-        </section>
-
-        <section class="period-report-card">
-          <div class="period-report-header">
-            <h3>月報匯出</h3>
-            <button type="button" id="export-monthly-csv" class="secondary-button">匯出月報 CSV</button>
-          </div>
-          <label>
-            <span>月報警示門檻</span>
-            <div class="input-prefix threshold-input">
-              <strong>NT$</strong>
-              <input type="number" id="month-alert-threshold" min="0" step="100" value="1000" />
-            </div>
-          </label>
-          <p class="threshold-hint">月消費超過此門檻時會顯示警示，並寫入月報 CSV。</p>
-          <label>
-            <span>月報月份</span>
-            <input type="month" id="month-reference" />
-          </label>
-          <div id="monthly-summary" class="summary-list empty-state">尚無可用月報資料。</div>
-        </section>
-
-        <section class="period-report-card">
-          <div class="period-report-header">
-            <h3>年報匯出</h3>
-            <button type="button" id="export-yearly-csv" class="secondary-button">匯出年報 CSV</button>
-          </div>
-          <label>
-            <span>年報年份</span>
-            <input type="number" id="year-reference" min="2020" max="2100" step="1" />
-          </label>
-          <div id="yearly-summary" class="summary-list empty-state">尚無可用年報資料。</div>
-        </section>
-      </div>
+          <button type="button" id="print-discharge-report" class="primary-button">列印病人確認表</button>
+        </div>
+        <div class="discharge-report-filters">
+          <label><span>病人</span><select id="discharge-patient-select"></select></label>
+          <label><span>住院起日</span><input type="date" id="discharge-start-date" /></label>
+          <label><span>統計迄日</span><input type="date" id="discharge-end-date" /></label>
+        </div>
+        <div id="discharge-summary" class="summary-list empty-state">請選擇病人與日期範圍。</div>
+      </section>
     </section>
 
     <section id="print-sheet" class="print-sheet" aria-hidden="true"></section>
@@ -292,6 +262,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./product-images.js?v=20260913b"></script>
   <script src="./catalog.js?v=20260914a"></script>
-  <script src="./app.js?v=20260922b"></script>
+  <script src="./app.js?v=20260922c"></script>
 </body>
 </html>

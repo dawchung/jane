@@ -224,17 +224,12 @@ const elements = {
   toast: document.querySelector("#toast"),
   aggregateSummary: document.querySelector("#aggregate-summary"),
   distributionList: document.querySelector("#distribution-list"),
-  weekReferenceDate: document.querySelector("#week-reference-date"),
-  monthReference: document.querySelector("#month-reference"),
-  monthAlertThreshold: document.querySelector("#month-alert-threshold"),
-  weeklySummary: document.querySelector("#weekly-summary"),
-  monthlySummary: document.querySelector("#monthly-summary"),
-  yearlySummary: document.querySelector("#yearly-summary"),
-  yearReference: document.querySelector("#year-reference"),
+  dischargePatientSelect: document.querySelector("#discharge-patient-select"),
+  dischargeStartDate: document.querySelector("#discharge-start-date"),
+  dischargeEndDate: document.querySelector("#discharge-end-date"),
+  dischargeSummary: document.querySelector("#discharge-summary"),
+  printDischargeReport: document.querySelector("#print-discharge-report"),
   exportCsv: document.querySelector("#export-csv"),
-  exportWeeklyCsv: document.querySelector("#export-weekly-csv"),
-  exportMonthlyCsv: document.querySelector("#export-monthly-csv"),
-  exportYearlyCsv: document.querySelector("#export-yearly-csv"),
   printReport: document.querySelector("#print-report"),
   statPatients: document.querySelector("#stat-patients"),
   statOrders: document.querySelector("#stat-orders"),
@@ -272,10 +267,7 @@ async function initialize() {
 function bindSessionForm() {
   elements.shoppingDate.value = state.session.date;
   elements.sessionNote.value = state.session.note;
-  elements.monthAlertThreshold.value = String(state.session.monthlyAlertThreshold || defaultMonthlyAlertThreshold);
-  elements.weekReferenceDate.value = state.session.date;
-  elements.monthReference.value = toMonthValue(state.session.date);
-  elements.yearReference.value = String(new Date(`${state.session.date}T00:00:00`).getFullYear());
+  elements.dischargeEndDate.value = state.session.date;
 
   elements.shoppingDate.addEventListener("change", () => {
     changeShoppingDate(elements.shoppingDate.value);
@@ -391,9 +383,7 @@ function changeShoppingDate(nextDate) {
   loadDailySession(date);
   state.session.updatedAt = new Date().toISOString();
   elements.sessionNote.value = state.session.note;
-  elements.weekReferenceDate.value = date;
-  elements.monthReference.value = toMonthValue(date);
-  elements.yearReference.value = String(new Date(`${date}T00:00:00`).getFullYear());
+  if (!elements.dischargeEndDate.value) elements.dischargeEndDate.value = date;
   persist();
   render();
 }
@@ -654,34 +644,20 @@ function bindToolbar() {
     exportCsv();
   });
 
-  elements.exportWeeklyCsv.addEventListener("click", () => {
-    exportWeeklyCsv();
+  elements.dischargePatientSelect.addEventListener("change", () => {
+    setDischargeDateRangeForPatient(elements.dischargePatientSelect.value);
+    renderDischargeSummary();
   });
-
-  elements.exportMonthlyCsv.addEventListener("click", () => {
-    exportMonthlyCsv();
-  });
-
-  elements.exportYearlyCsv.addEventListener("click", () => {
-    exportYearlyCsv();
-  });
-
-  elements.weekReferenceDate.addEventListener("input", () => {
-    renderPeriodReports();
-  });
-
-  elements.monthReference.addEventListener("input", () => {
-    renderPeriodReports();
-  });
-
-  elements.yearReference.addEventListener("input", () => {
-    renderPeriodReports();
-  });
-
-  elements.monthAlertThreshold.addEventListener("input", () => {
-    state.session.monthlyAlertThreshold = getMonthlyAlertThreshold();
-    persist();
-    renderPeriodReports();
+  elements.dischargeStartDate.addEventListener("input", renderDischargeSummary);
+  elements.dischargeEndDate.addEventListener("input", renderDischargeSummary);
+  elements.printDischargeReport.addEventListener("click", () => {
+    const summary = buildDischargeSummary();
+    if (!summary.rows.length) {
+      showToast("所選期間沒有此病人的購物資料。", "warning");
+      return;
+    }
+    renderDischargePrintSheet(summary);
+    window.print();
   });
 
   elements.syncRefresh.addEventListener("click", async () => {
@@ -907,7 +883,7 @@ function render() {
   renderCatalog();
   renderCart();
   renderReports();
-  renderPeriodReports();
+  renderDischargeSummary();
   renderHeroStats();
   renderPageContext();
   renderPrintSheet();
@@ -1742,6 +1718,113 @@ function exportCsv() {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function getDischargePatientOptions() {
+  const patientMap = new Map(state.patientDirectory.map((patient) => [patient.id, patient]));
+  Object.values(state.dailySessions || {}).forEach((daily) => {
+    (daily.patients || []).forEach((patient) => {
+      if (!patientMap.has(patient.id)) patientMap.set(patient.id, patient);
+    });
+  });
+  return [...patientMap.values()].sort((left, right) =>
+    normalizeBed(left.bed).localeCompare(normalizeBed(right.bed), "zh-Hant", { numeric: true }));
+}
+
+function getPatientSessionDates(patientId) {
+  return Object.entries(state.dailySessions || {})
+    .filter(([, daily]) => (daily.patients || []).some((patient) => patient.id === patientId &&
+      (patient.cart?.length || Number(patient.confirmedTotal || 0) > 0)))
+    .map(([date]) => date)
+    .sort();
+}
+
+function setDischargeDateRangeForPatient(patientId) {
+  const dates = getPatientSessionDates(patientId);
+  elements.dischargeStartDate.value = dates[0] || state.session.date || getTodayDate();
+  elements.dischargeEndDate.value = dates.at(-1) || state.session.date || getTodayDate();
+}
+
+function buildDischargeSummary() {
+  const patientId = elements.dischargePatientSelect.value;
+  const startDate = elements.dischargeStartDate.value || "0000-01-01";
+  const endDate = elements.dischargeEndDate.value || "9999-12-31";
+  const directoryPatient = getDirectoryPatient(patientId);
+  const rows = [];
+
+  Object.entries(state.dailySessions || {})
+    .filter(([date]) => date >= startDate && date <= endDate)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .forEach(([date, daily]) => {
+      const patient = (daily.patients || []).find((entry) => entry.id === patientId);
+      if (!patient || (!patient.cart?.length && !Number(patient.confirmedTotal || 0))) return;
+      const total = getPatientTotal(patient);
+      const items = (patient.cart || []).map((entry) => `${entry.name}×${entry.quantity}`).join("、") || "購物紀錄";
+      rows.push({
+        date,
+        bed: patient.bed,
+        name: patient.name,
+        items,
+        total,
+        balanceAfter: Number(patient.balance || 0) - total
+      });
+    });
+
+  const fallbackPatient = getDischargePatientOptions().find((patient) => patient.id === patientId);
+  const patient = directoryPatient || fallbackPatient || null;
+  const totalSpent = rows.reduce((sum, row) => sum + row.total, 0);
+  const currentBalance = directoryPatient
+    ? Number(directoryPatient.balance || 0)
+    : (rows.at(-1)?.balanceAfter ?? Number(patient?.balance || 0));
+  return { patient, startDate, endDate, rows, totalSpent, currentBalance };
+}
+
+function renderDischargeSummary() {
+  const options = getDischargePatientOptions();
+  const previousId = elements.dischargePatientSelect.value;
+  const selectedId = options.some((patient) => patient.id === previousId)
+    ? previousId
+    : (options.some((patient) => patient.id === state.activePatientId) ? state.activePatientId : options[0]?.id || "");
+  elements.dischargePatientSelect.innerHTML = options.length
+    ? options.map((patient) => `<option value="${escapeHtml(patient.id)}" ${patient.id === selectedId ? "selected" : ""}>${escapeHtml(patient.bed)}床 ${escapeHtml(patient.name)}</option>`).join("")
+    : '<option value="">尚無病人資料</option>';
+
+  if (!elements.dischargeStartDate.value && selectedId) setDischargeDateRangeForPatient(selectedId);
+  const summary = buildDischargeSummary();
+  elements.printDischargeReport.disabled = !summary.rows.length;
+  if (!summary.patient || !summary.rows.length) {
+    elements.dischargeSummary.className = "summary-list empty-state";
+    elements.dischargeSummary.textContent = "所選期間沒有此病人的購物資料。";
+    return;
+  }
+
+  elements.dischargeSummary.className = "discharge-summary";
+  elements.dischargeSummary.innerHTML = `
+    <div class="discharge-totals">
+      <article><strong>${escapeHtml(summary.patient.bed)}床 ${escapeHtml(summary.patient.name)}</strong><span>${summary.startDate}～${summary.endDate}</span></article>
+      <article><strong>期間購物總額</strong><span>NT$${summary.totalSpent}</span></article>
+      <article><strong>目前零用金餘額</strong><span>NT$${summary.currentBalance}</span></article>
+    </div>
+    <div class="discharge-table-wrap"><table class="discharge-table">
+      <thead><tr><th>日期</th><th>每日購買品項</th><th>支出</th><th>購後餘額</th></tr></thead>
+      <tbody>${summary.rows.map((row) => `<tr><td>${row.date}</td><td>${escapeHtml(row.items)}</td><td>NT$${row.total}</td><td>NT$${row.balanceAfter}</td></tr>`).join("")}</tbody>
+    </table></div>`;
+}
+
+function renderDischargePrintSheet(summary) {
+  elements.printSheet.innerHTML = `
+    <header class="print-header">
+      <h1>住院期間購物與零用金餘額確認表</h1>
+      <p>病人：${escapeHtml(summary.patient.bed)}床 ${escapeHtml(summary.patient.name)}　統計期間：${summary.startDate}～${summary.endDate}</p>
+    </header>
+    <section>
+      <table class="print-discharge-table"><thead><tr><th>日期</th><th>每日購買品項</th><th>支出</th><th>購後餘額</th></tr></thead>
+      <tbody>${summary.rows.map((row) => `<tr><td>${row.date}</td><td class="print-items">${escapeHtml(row.items)}</td><td>NT$${row.total}</td><td>NT$${row.balanceAfter}</td></tr>`).join("")}</tbody>
+      <tfoot><tr><th colspan="2">住院期間購物總額</th><th colspan="2">NT$${summary.totalSpent}</th></tr><tr><th colspan="2">目前零用金餘額</th><th colspan="2">NT$${summary.currentBalance}</th></tr></tfoot>
+      </table>
+    </section>
+    <p class="print-confirmation">本人已確認上述購物紀錄及零用金剩餘金額無誤。</p>
+    <footer class="print-signatures discharge-signatures"><span>病人簽名：________________</span><span>護理人員：________________</span><span>日期：____年____月____日</span></footer>`;
 }
 
 function exportWeeklyCsv() {

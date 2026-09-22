@@ -80,6 +80,8 @@ globalThis.__appTest = {
   addPatientToCurrentDate,
   saveCurrentDailySession,
   renderPrintSheet,
+  buildDischargeSummary,
+  renderDischargePrintSheet,
   addBalanceEntry,
   setState(value) { state = mergeState(value); normalizeState(); },
   getState() { return structuredClone(state); }
@@ -235,4 +237,29 @@ test.renderPrintSheet();
 assert.match(getElement("#print-sheet").innerHTML, /每日購物總表/, "Step 4 應產生每日總表列印內容");
 assert.match(getElement("#print-sheet").innerHTML, /print-patient-table/, "病人分發總表應使用獨立欄寬設定");
 assert.match(getElement("#print-sheet").innerHTML, /col-items/, "購物內容欄應可獨立加寬");
+
+test.setState({
+  ...common,
+  session: { ...common.session, date: "2026-09-15" },
+  patientDirectory: [{ id: "b", bed: "P1-02", name: "乙", balance: 900, shoppingLimit: 200, updatedAt: timestamp }],
+  dailySessions: {
+    "2026-09-14": {
+      date: "2026-09-14", note: "", updatedAt: timestamp,
+      completedPurchases: {}, completedDistribution: {},
+      patients: [{
+        id: "b", bed: "P1-02", name: "乙", balance: 1000, shoppingLimit: 200,
+        cart: [{ name: "100元電話卡", price: 100, quantity: 1 }], confirmedTotal: 100, updatedAt: timestamp
+      }]
+    }
+  }
+});
+getElement("#discharge-patient-select").value = "b";
+getElement("#discharge-start-date").value = "2026-09-14";
+getElement("#discharge-end-date").value = "2026-09-15";
+const dischargeSummary = test.buildDischargeSummary();
+assert.equal(dischargeSummary.rows.length, 1, "出院彙整表應依病人與日期擷取每日購物紀錄");
+assert.equal(dischargeSummary.totalSpent, 100, "出院彙整表應計算住院期間購物總額");
+test.renderDischargePrintSheet(dischargeSummary);
+assert.match(getElement("#print-sheet").innerHTML, /住院期間購物與零用金餘額確認表/,
+  "出院時應產生可供病人確認的列印表單");
 console.log("smoke test passed");
