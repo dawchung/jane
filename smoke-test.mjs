@@ -115,6 +115,28 @@ assert.equal(merged.patientDirectory.length, 2, "兩台裝置的病人基本名�
 assert.equal(test.getPatientLimit(merged.patients.find((patient) => patient.id === "a")), 100);
 assert.equal(test.getPatientLimit(merged.patients.find((patient) => patient.id === "b")), 200);
 
+const deletionTime = "2026-09-14T13:00:00.000Z";
+const mergedAfterDelete = test.reconcileSharedState(
+  {
+    ...merged,
+    patientDirectory: merged.patientDirectory.filter((patient) => patient.id !== "a"),
+    deletedPatients: { a: deletionTime },
+    removedDailyPatients: { "2026-09-14": { a: deletionTime } },
+    dailySessions: {
+      ...merged.dailySessions,
+      "2026-09-14": {
+        ...merged.dailySessions["2026-09-14"],
+        patients: merged.dailySessions["2026-09-14"].patients.filter((patient) => patient.id !== "a")
+      }
+    }
+  },
+  merged
+);
+assert.equal(mergedAfterDelete.patientDirectory.some((patient) => patient.id === "a"), false,
+  "病人刪除後不應被另一台裝置的舊名單復原");
+assert.equal(mergedAfterDelete.patients.some((patient) => patient.id === "a"), false,
+  "病人從當日名單刪除後不應被雲端舊資料復原");
+
 test.setState({
   ...common,
   activePatientId: "b",

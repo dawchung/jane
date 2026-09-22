@@ -158,6 +158,8 @@ const defaultState = {
   completedDistribution: {},
   historyLogs: [],
   balanceTransactions: [],
+  deletedPatients: {},
+  removedDailyPatients: {},
   rosterVersion: 0,
   dataVersion: 0
 };
@@ -249,6 +251,7 @@ async function initialize() {
   const rosterChanged = applyInitialRoster();
   bindSessionForm();
   bindPatientForm();
+  bindDirectoryInteraction();
   bindPatientOverviewInteraction();
   bindToolbar();
   bindCatalogInteraction();
@@ -456,6 +459,67 @@ function bindPatientForm() {
     persist();
     render();
     showToast(`${patient.bed}床 ${patient.name} 已加入病人名單。`);
+  });
+}
+
+function bindDirectoryInteraction() {
+  elements.directoryList.addEventListener("submit", (event) => {
+    const form = event.target.closest(".directory-edit-form");
+    if (!form) return;
+    event.preventDefault();
+
+    const patient = getDirectoryPatient(form.dataset.patientId);
+    if (!patient) return;
+
+    const bed = normalizeBed(form.querySelector('[name="bed"]')?.value);
+    const name = maskPatientName(form.querySelector('[name="name"]')?.value);
+    const balance = Number(form.querySelector('[name="balance"]')?.value);
+    const shoppingLimit = Number(form.querySelector('[name="shoppingLimit"]')?.value);
+    const duplicate = state.patientDirectory.find((entry) =>
+      entry.id !== patient.id && normalizeBed(entry.bed) === bed);
+
+    if (!bed || !name || !Number.isFinite(balance) || balance < 0 ||
+        !Number.isFinite(shoppingLimit) || shoppingLimit < 0) {
+      showToast("請完整填寫床號、姓名、零用金與購物上限。", "warning");
+      return;
+    }
+    if (duplicate) {
+      showToast(`${bed} 已存在病人名單中。`, "warning");
+      return;
+    }
+
+    const now = new Date().toISOString();
+    Object.assign(patient, { bed, name, balance: Math.floor(balance), shoppingLimit: Math.floor(shoppingLimit), updatedAt: now });
+    const dailyPatient = state.patients.find((entry) => entry.id === patient.id);
+    if (dailyPatient) {
+      Object.assign(dailyPatient, { bed, name, balance: patient.balance, shoppingLimit: patient.shoppingLimit, updatedAt: now });
+    }
+    sortPatientDirectory();
+    persist();
+    render();
+    showToast(`${bed}床 ${name} 的資料已更新。`);
+  });
+
+  elements.directoryList.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-delete-patient-id]");
+    if (!button) return;
+    const patient = getDirectoryPatient(button.dataset.deletePatientId);
+    if (!patient) return;
+    if (!window.confirm(`確定要從病人名單刪除 ${patient.bed}床 ${patient.name}？\n\n本日尚未完成的購物資料會一併移除，過去的購物與入帳紀錄仍會保留。`)) return;
+
+    const now = new Date().toISOString();
+    state.deletedPatients[patient.id] = now;
+    state.removedDailyPatients[state.session.date] = {
+      ...(state.removedDailyPatients[state.session.date] || {}),
+      [patient.id]: now
+    };
+    state.patientDirectory = state.patientDirectory.filter((entry) => entry.id !== patient.id);
+    state.patients = state.patients.filter((entry) => entry.id !== patient.id);
+    if (state.activePatientId === patient.id) state.activePatientId = state.patients[0]?.id || null;
+    state.session.updatedAt = now;
+    persist();
+    render();
+    showToast(`${patient.bed}床 ${patient.name} 已從病人名單刪除。`);
   });
 }
 
@@ -855,9 +919,24 @@ function renderDirectoryList() {
   }
   elements.directoryList.className = "directory-list";
   elements.directoryList.innerHTML = state.patientDirectory.map((patient) => `
-    <span class="directory-chip"><strong>${patient.bed}</strong> ${patient.name}
-      <small>餘額 NT$${patient.balance}／預設上限 NT$${patient.shoppingLimit || 100}</small>
-    </span>`).join("");
+    <details class="directory-card">
+      <summary>
+        <span><strong>${escapeHtml(patient.bed)}</strong> ${escapeHtml(patient.name)}
+          <small>餘額 NT$${patient.balance}／預設上限 NT$${patient.shoppingLimit ?? 100}</small>
+        </span>
+        <span class="directory-edit-label">修改</span>
+      </summary>
+      <form class="directory-edit-form" data-patient-id="${escapeHtml(patient.id)}">
+        <label><span>床號</span><input name="bed" type="text" maxlength="10" value="${escapeHtml(patient.bed)}" required /></label>
+        <label><span>病人姓名</span><input name="name" type="text" maxlength="30" value="${escapeHtml(patient.name)}" required /></label>
+        <label><span>目前零用金</span><input name="balance" type="number" min="0" step="1" value="${patient.balance}" required /></label>
+        <label><span>預設購物上限</span><input name="shoppingLimit" type="number" min="0" step="1" value="${patient.shoppingLimit ?? 100}" required /></label>
+        <div class="directory-card-actions">
+          <button type="submit" class="primary-button">儲存修改</button>
+          <button type="button" class="secondary-button danger-button" data-delete-patient-id="${escapeHtml(patient.id)}">刪除病人</button>
+        </div>
+      </form>
+    </details>`).join("");
 }
 
 function renderDailyPatientPicker() {
@@ -1460,6 +1539,15 @@ function maskPatientName(value) {
   if (characters.length <= 1) return characters.join("");
   if (characters.length === 2) return `${characters[0]}X`;
   return `${characters[0]}${"X".repeat(characters.length - 2)}${characters.at(-1)}`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function applyInitialRoster() {
@@ -2095,6 +2183,13 @@ function mergeState(nextState) {
             createdAt: entry.createdAt || ""
           }))
       : [],
+    deletedPatients: Object.fromEntries(Object.entries(parsed.deletedPatients || {})
+      .filter(([patientId, deletedAt]) => patientId && typeof deletedAt === "string")),
+    removedDailyPatients: Object.fromEntries(Object.entries(parsed.removedDailyPatients || {}).map(([date, removals]) => [
+      date,
+      Object.fromEntries(Object.entries(removals || {})
+        .filter(([patientId, deletedAt]) => patientId && typeof deletedAt === "string"))
+    ])),
     patients: Array.isArray(parsed.patients)
       ? parsed.patients.map((patient) => ({
           ...patient,
@@ -2106,7 +2201,10 @@ function mergeState(nextState) {
           updatedAt: patient.updatedAt || ""
         }))
       : [],
-    patientDirectory: Array.isArray(parsed.patientDirectory) ? parsed.patientDirectory.map(normalizeDirectory) : [],
+    patientDirectory: Array.isArray(parsed.patientDirectory)
+      ? parsed.patientDirectory.map(normalizeDirectory)
+          .filter((patient) => !parsed.deletedPatients?.[patient.id])
+      : [],
     dailySessions,
     rosterVersion: Number(parsed.rosterVersion || 0),
     dataVersion: Number(parsed.dataVersion || 0)
@@ -2117,17 +2215,34 @@ function reconcileSharedState(localState, remoteState) {
   const local = mergeState(localState);
   const remote = mergeState(remoteState);
   const activeDate = local.session.date || getTodayDate();
+  const deletedPatients = { ...remote.deletedPatients };
+  Object.entries(local.deletedPatients).forEach(([patientId, deletedAt]) => {
+    deletedPatients[patientId] = newerTimestamp(deletedPatients[patientId], deletedAt);
+  });
   const directoryMap = new Map(remote.patientDirectory.map((patient) => [patient.id, patient]));
 
   local.patientDirectory.forEach((patient) => {
     const remotePatient = directoryMap.get(patient.id);
     directoryMap.set(patient.id, remotePatient ? newerEntity(patient, remotePatient) : patient);
   });
+  Object.keys(deletedPatients).forEach((patientId) => directoryMap.delete(patientId));
+
+  const removedDailyPatients = structuredClone(remote.removedDailyPatients);
+  Object.entries(local.removedDailyPatients).forEach(([date, removals]) => {
+    removedDailyPatients[date] ||= {};
+    Object.entries(removals).forEach(([patientId, deletedAt]) => {
+      removedDailyPatients[date][patientId] = newerTimestamp(removedDailyPatients[date][patientId], deletedAt);
+    });
+  });
 
   const dailySessionMap = new Map(Object.entries(remote.dailySessions));
   Object.entries(local.dailySessions).forEach(([date, daily]) => {
     const remoteDaily = dailySessionMap.get(date);
     dailySessionMap.set(date, remoteDaily ? mergeDailySessionEntities(daily, remoteDaily) : daily);
+  });
+  Object.entries(removedDailyPatients).forEach(([date, removals]) => {
+    const daily = dailySessionMap.get(date);
+    if (daily) daily.patients = (daily.patients || []).filter((patient) => !removals[patient.id]);
   });
   const dailySessions = Object.fromEntries(dailySessionMap);
   const activeDaily = dailySessions[activeDate] || { note: "", patients: [], completedPurchases: {}, completedDistribution: {} };
@@ -2159,6 +2274,8 @@ function reconcileSharedState(localState, remoteState) {
     completedDistribution: activeDaily.completedDistribution || {},
     historyLogs: [...logMap.values()].sort((left, right) => left.date.localeCompare(right.date)),
     balanceTransactions: [...transactionMap.values()],
+    deletedPatients,
+    removedDailyPatients,
     rosterVersion: Math.max(Number(local.rosterVersion || 0), Number(remote.rosterVersion || 0)),
     dataVersion: Math.max(Number(local.dataVersion || 0), Number(remote.dataVersion || 0))
   });
