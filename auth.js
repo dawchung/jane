@@ -14,10 +14,40 @@
   const logoutButton = document.querySelector("#logout-button");
   const SESSION_KEY = "psych-shopping-local-auth";
   const AUDIT_KEY = "psych-shopping-local-audit";
+  const DATA_KEY = "psych-shopping-session";
+  const RESTORE_KEY = "psych-shopping-legacy-restore-pending";
   let session = null;
   let profile = null;
   let resolveReady;
+  let readyResolved = false;
   const ready = new Promise((resolve) => { resolveReady = resolve; });
+
+  function finishReady() {
+    if (readyResolved) return;
+    readyResolved = true;
+    resolveReady({ session, profile });
+  }
+
+  function hasUsefulData(rawValue) {
+    try {
+      const value = JSON.parse(rawValue || "null");
+      return Array.isArray(value?.patientDirectory) && value.patientDirectory.length > 0
+        || Object.keys(value?.dailySessions || {}).length > 0
+        || Array.isArray(value?.historyLogs) && value.historyLogs.length > 0
+        || Array.isArray(value?.balanceTransactions) && value.balanceTransactions.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  function prepareLegacyDataRestore() {
+    const legacyData = localStorage.getItem(DATA_KEY);
+    const currentData = sessionStorage.getItem(DATA_KEY);
+    if (hasUsefulData(legacyData) && !hasUsefulData(currentData)) {
+      sessionStorage.setItem(DATA_KEY, legacyData);
+      sessionStorage.setItem(RESTORE_KEY, "1");
+    }
+  }
 
   function normalizeCard(value) {
     return String(value || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
@@ -70,6 +100,7 @@
   }
 
   function acceptUser(user) {
+    prepareLegacyDataRestore();
     profile = {
       card_number: user.cardNumber,
       display_name: user.displayName,
@@ -80,6 +111,7 @@
     session = { user: { id: `local:${user.cardNumber}` }, created_at: new Date().toISOString() };
     sessionStorage.setItem(SESSION_KEY, JSON.stringify({ cardNumber: user.cardNumber }));
     setAuthenticatedView();
+    finishReady();
     return logAction("login");
   }
 
@@ -140,7 +172,7 @@
   if (!enabled) {
     protectedApp.hidden = false;
     loginScreen.hidden = true;
-    resolveReady({ session: null, profile: null });
+    finishReady();
     return;
   }
 
@@ -149,10 +181,9 @@
     const saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null");
     const user = authConfig.users?.find((candidate) =>
       candidate.active !== false && normalizeCard(candidate.cardNumber) === normalizeCard(saved?.cardNumber));
-    if (user) acceptUser(user).then(() => resolveReady({ session, profile }));
-    else resolveReady({ session: null, profile: null });
+    if (user) acceptUser(user);
   } catch {
-    resolveReady({ session: null, profile: null });
+    sessionStorage.removeItem(SESSION_KEY);
   }
   startIdleTimer();
 })();
