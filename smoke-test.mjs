@@ -66,6 +66,7 @@ globalThis.__appTest = {
   mergeState,
   reconcileSharedState,
   getPatientLimit,
+  getPatientLimitTotal,
   syncCurrentSessionToHistory,
   buildPeriodSummary,
   buildPeriodCsvRows,
@@ -114,6 +115,20 @@ assert.equal(merged.patients.length, 2, "兩台裝置新增的不同病人應合
 assert.equal(merged.patientDirectory.length, 2, "兩台裝置的病人基本名單應合併");
 assert.equal(test.getPatientLimit(merged.patients.find((patient) => patient.id === "a")), 100);
 assert.equal(test.getPatientLimit(merged.patients.find((patient) => patient.id === "b")), 200);
+
+const limitPatient = {
+  shoppingLimit: 100,
+  cart: [
+    { name: "麥香紅茶", price: 10, quantity: 2 },
+    { name: "100元電話卡", price: 100, quantity: 1 },
+    { name: "牙刷", price: 20, quantity: 1 },
+    { name: "臨時自訂品", price: 50, quantity: 1 }
+  ]
+};
+assert.equal(test.getPatientLimitTotal(limitPatient), 20,
+  "日用品、電話卡、其他與舊自訂品不應計入每日購物上限");
+assert.equal(limitPatient.cart.reduce((sum, entry) => sum + entry.price * entry.quantity, 0), 190,
+  "排除上限的品項仍應計入實際支出");
 
 const deletionTime = "2026-09-14T13:00:00.000Z";
 const mergedAfterDelete = test.reconcileSharedState(

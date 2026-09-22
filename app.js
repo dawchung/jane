@@ -119,6 +119,7 @@ const syncConfig = {
   pollIntervalMs: Number(appConfig.sync?.pollIntervalMs || 5000)
 };
 const defaultMonthlyAlertThreshold = 1000;
+const limitExemptCategories = new Set(["日用品", "電話卡", "其他"]);
 const dataVersion = 2;
 const rosterVersion = 1;
 const initialRoster = [
@@ -821,7 +822,8 @@ function bindCartInteraction() {
     }
 
     const total = getPatientTotal(patient);
-    if (total > patient.balance || total > getPatientLimit(patient)) {
+    const limitTotal = getPatientLimitTotal(patient);
+    if (total > patient.balance || limitTotal > getPatientLimit(patient)) {
       showToast("目前金額超過零用金或購物上限，請先調整品項。", "warning");
       return;
     }
@@ -968,16 +970,19 @@ function renderDateStatus() {
 function renderPageContext() {
   const patient = getActivePatient();
   const total = patient ? getPatientTotal(patient) : 0;
+  const limitTotal = patient ? getPatientLimitTotal(patient) : 0;
   const patientLimit = patient ? getPatientLimit(patient) : 0;
-  const remaining = patient ? Math.min(patient.balance, patientLimit) - total : 0;
-  const isOver = Boolean(patient && (total > patient.balance || total > patientLimit));
+  const balanceRemaining = patient ? patient.balance - total : 0;
+  const limitRemaining = patientLimit - limitTotal;
+  const remaining = Math.min(balanceRemaining, limitRemaining);
+  const isOver = Boolean(patient && (balanceRemaining < 0 || limitRemaining < 0));
 
   elements.headerDate.textContent = state.session.date
     ? `${state.session.date.replaceAll("-", "/")} 購物`
     : "本次購物";
   elements.mobilePatient.textContent = patient ? `${patient.bed}床 ${patient.name}` : "尚未選擇病人";
   elements.mobileBudget.textContent = patient
-    ? (isOver ? `已超出可用金額 NT$${Math.abs(remaining)}` : `還可選購 NT$${remaining}`)
+    ? (isOver ? `已超出可用金額 NT$${Math.abs(remaining)}` : `上限尚餘 NT$${limitRemaining}｜零用金 NT$${balanceRemaining}`)
     : "請先建立購物名單";
   elements.mobileTotal.textContent = `NT$${total}`;
   elements.mobileCartBar.classList.toggle("is-over", isOver);
@@ -991,8 +996,9 @@ function renderPatientQuickNav() {
 
   elements.patientQuickNav.innerHTML = state.patients.map((patient) => {
     const total = getPatientTotal(patient);
+    const limitTotal = getPatientLimitTotal(patient);
     const active = patient.id === state.activePatientId;
-    const over = total > getPatientLimit(patient) || total > patient.balance;
+    const over = limitTotal > getPatientLimit(patient) || total > patient.balance;
     return `<button type="button" class="patient-chip ${active ? "is-active" : ""} ${over ? "has-alert" : ""}" data-patient-id="${patient.id}">
       <strong>${patient.bed}床</strong><span>${patient.name}</span><small>NT$${total}</small>
     </button>`;
@@ -1022,9 +1028,10 @@ function renderPatientOverview() {
   }
 
   const total = getPatientTotal(patient);
+  const limitTotal = getPatientLimitTotal(patient);
   const remaining = patient.balance - total;
   const patientLimit = getPatientLimit(patient);
-  const budgetRemaining = patientLimit - total;
+  const budgetRemaining = patientLimit - limitTotal;
   const overBudget = budgetRemaining < 0 || remaining < 0;
 
   elements.patientOverview.className = "patient-overview";
@@ -1048,7 +1055,7 @@ function renderPatientOverview() {
       </article>
     </div>
     <p class="summary-meta">
-      ${overBudget ? "已超過病人零用金或本次購物上限，請調整品項。" : "目前金額在可支出範圍內。"}
+      ${overBudget ? "已超過病人零用金或本次購物上限，請調整品項。" : `計入上限 NT$${limitTotal}；日用品、電話卡與其他類別不計入每日上限。`}
     </p>
     <form id="edit-patient-form" class="patient-edit-form" aria-label="修改本次購物上限">
       <label>本次購物上限
@@ -1198,11 +1205,12 @@ function getPriceSubGroups(items) {
 function renderCart() {
   const patient = getActivePatient();
   const total = patient ? getPatientTotal(patient) : 0;
+  const limitTotal = patient ? getPatientLimitTotal(patient) : 0;
   const patientLimit = patient ? getPatientLimit(patient) : 0;
   elements.cartTotal.textContent = `NT$${total}`;
-  elements.cartTotal.className = `cart-total ${patient && (total > patient.balance || total > patientLimit) ? "is-over" : ""}`;
+  elements.cartTotal.className = `cart-total ${patient && (total > patient.balance || limitTotal > patientLimit) ? "is-over" : ""}`;
   const hasItems = Boolean(patient?.cart.length);
-  const isOver = Boolean(patient && (total > patient.balance || total > patientLimit));
+  const isOver = Boolean(patient && (total > patient.balance || limitTotal > patientLimit));
   elements.clearCart.disabled = !hasItems;
   elements.confirmOrder.disabled = !hasItems || isOver;
   elements.cartStatus.className = `cart-status ${isOver ? "is-over" : "is-safe"}`;
@@ -1211,7 +1219,7 @@ function renderCart() {
     : isOver
       ? "超過零用金或購物上限，請減少品項。"
       : hasItems
-        ? `金額符合規定，購後至少剩餘 NT$${Math.min(patient.balance, patientLimit) - total}。`
+        ? `總額 NT$${total}；其中 NT$${limitTotal} 計入每日上限，上限尚餘 NT$${patientLimit - limitTotal}。`
         : "選擇商品後，系統會在這裡檢查金額。";
 
   if (!patient || patient.cart.length === 0) {
@@ -1224,12 +1232,14 @@ function renderCart() {
   elements.cartItems.innerHTML = patient.cart
     .map((entry) => {
       const subtotal = entry.price * entry.quantity;
+      const category = entry.category || getProductCategory(entry.name);
+      const exemptLabel = limitExemptCategories.has(category) ? " · 不計每日上限" : "";
       return `
         <article class="cart-item">
           <div class="cart-item-header">
             <div>
               <strong>${entry.name}</strong>
-              <div class="summary-meta">單價 NT$${entry.price}</div>
+              <div class="summary-meta">單價 NT$${entry.price}${exemptLabel}</div>
             </div>
             <strong>NT$${subtotal}</strong>
           </div>
@@ -1434,7 +1444,7 @@ function addCustomItemToActivePatient() {
   if (existing) {
     existing.quantity += 1;
   } else {
-    patient.cart.push({ name, price, quantity: 1 });
+    patient.cart.push({ name, price, category: "其他", quantity: 1 });
   }
 
   markPatientUpdated(patient);
@@ -1628,6 +1638,15 @@ function getPatientTotal(patient) {
   return patient.cart.reduce((sum, entry) => sum + entry.price * entry.quantity, 0);
 }
 
+function getPatientLimitTotal(patient) {
+  return patient.cart.reduce((sum, entry) => {
+    const category = entry.category || getProductCategory(entry.name);
+    return limitExemptCategories.has(category)
+      ? sum
+      : sum + Number(entry.price || 0) * Number(entry.quantity || 0);
+  }, 0);
+}
+
 function getPatientLimit(patient) {
   const limit = Number(patient?.shoppingLimit);
   return Number.isFinite(limit) && limit >= 0 ? limit : Number(state.session.budgetLimit || 0);
@@ -1676,10 +1695,17 @@ function findProduct(productName) {
   for (const group of products) {
     const match = group.items.find((item) => item.name === productName);
     if (match) {
-      return match;
+      return { ...match, category: group.category };
     }
   }
   return null;
+}
+
+function getProductCategory(productName) {
+  for (const group of products) {
+    if (group.items.some((item) => item.name === productName)) return group.category;
+  }
+  return "其他";
 }
 
 function formatSessionTitle() {
