@@ -52,11 +52,22 @@ const context = {
     getItem: (key) => localData.get(key) || null,
     setItem: (key, value) => localData.set(key, value)
   },
+  sessionStorage: {
+    getItem: (key) => localData.get(`session:${key}`) || null,
+    setItem: (key, value) => localData.set(`session:${key}`, value),
+    removeItem: (key) => localData.delete(`session:${key}`)
+  },
   confirm: () => true,
   alert() {}
 };
 context.window = context;
 context.window.APP_CONFIG = { sync: { provider: "local" } };
+context.window.AUTH_GATE = {
+  ready: Promise.resolve(),
+  isAdmin: () => true,
+  getProfile: () => ({ display_name: "王護理師", role: "admin" }),
+  logAction() {}
+};
 context.window.PRODUCT_IMAGES = {};
 vm.createContext(context);
 vm.runInContext(fs.readFileSync("catalog.js", "utf8"), context);
@@ -217,10 +228,10 @@ assert.equal(test.migrateToDailySessions(), true, "舊資料應拆分為病人�
 assert.equal(test.applyInitialRoster(), true, "舊資料應執行一次名單移轉");
 current = test.getState();
 const migratedPatient = current.patientDirectory.find((patient) => patient.bed === "P1-10");
-assert.equal(current.patientDirectory.length, 19, "應預先建立19位匿名病人基本名單");
+assert.equal(current.patientDirectory.length, 1, "公開程式不應再預先建立病人名單");
 assert.equal(migratedPatient.name, "黃X凱");
 assert.equal(migratedPatient.balance, 5284, "既有零用金應保留");
-assert.equal(migratedPatient.shoppingLimit, 200, "黃X凱的個別上限應為200元");
+assert.equal(migratedPatient.shoppingLimit, 100, "既有病人的購物上限應保留");
 assert.equal(current.dailySessions["2026-09-14"].patients[0].cart.length, 1, "既有購物清單應保留在原日期");
 
 test.setState({
@@ -238,7 +249,8 @@ assert.match(getElement("#print-sheet").innerHTML, /每日購物總表/, "Step 4
 assert.match(getElement("#print-sheet").innerHTML, /print-patient-table/, "病人分發總表應使用獨立欄寬設定");
 assert.match(getElement("#print-sheet").innerHTML, /col-items/, "購物內容欄應可獨立加寬");
 assert.match(getElement("#print-sheet").innerHTML, /病人／家屬簽章/, "病人分發表應包含病人或家屬簽章欄");
-assert.match(getElement("#print-sheet").innerHTML, /工作人員簽章/, "病人分發表應包含工作人員簽章欄");
+assert.doesNotMatch(getElement("#print-sheet").innerHTML, /工作人員簽章/, "病人分發表不應再顯示工作人員簽章欄");
+assert.match(getElement("#print-sheet").innerHTML, /列印人員：王護理師/, "每日總表應帶入目前登入人員姓名");
 
 test.setState({
   ...common,
