@@ -878,6 +878,9 @@ button:disabled { cursor: not-allowed; opacity: .46; transform: none !important;
   .print-header { margin-bottom: 8mm; text-align: center; }
   .print-header h1 { font-size: 16pt; }
   .print-header p { margin: 3mm 0 0; font-size: 12pt; }
+  .print-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10mm; }
+  .print-section-heading h2 { margin-bottom: 3mm; }
+  .print-section-heading span { font-size: 11pt; white-space: nowrap; }
   .print-sheet section { margin-bottom: 8mm; }
   .print-sheet h2 { margin: 0 0 3mm; font-size: 14pt; }
   .print-sheet table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12pt; }
@@ -896,11 +899,10 @@ button:disabled { cursor: not-allowed; opacity: .46; transform: none !important;
   .print-sheet .print-patient-table .col-sequence { width: 4%; }
   .print-sheet .print-patient-table .col-bed { width: 9%; }
   .print-sheet .print-patient-table .col-name { width: 10%; }
-  .print-sheet .print-patient-table .col-items { width: 35%; }
+  .print-sheet .print-patient-table .col-items { width: 39%; }
   .print-sheet .print-patient-table .col-amount { width: 8%; }
   .print-sheet .print-patient-table .col-balance { width: 8%; }
-  .print-sheet .print-patient-table .col-patient-sign,
-  .print-sheet .print-patient-table .col-staff-sign { width: 13%; }
+  .print-sheet .print-patient-table .col-patient-sign { width: 22%; }
   .print-sheet .print-patient-table .signature-cell { height: 12mm; }
   .print-sheet .print-patient-table th:nth-child(1),
   .print-sheet .print-patient-table td:nth-child(1) { padding-left: 1mm; padding-right: 1mm; }
